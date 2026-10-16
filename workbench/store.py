@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import sqlite3
+import stat
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,6 +23,13 @@ def normalize_repo(repo: str) -> str:
 
 def connect(state: Path) -> sqlite3.Connection:
     state.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    descriptor = os.open(state, os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise ValueError("O banco local precisa ser arquivo regular.")
+        os.fchmod(descriptor, 0o600)
+    finally:
+        os.close(descriptor)
     connection = sqlite3.connect(state)
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA foreign_keys = ON")

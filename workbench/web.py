@@ -35,10 +35,12 @@ def create_server(state: Path, port: int = 8765, *, scanner=inspect_github):
 
         def _send(self, status, body, content_type="text/html; charset=utf-8", *, extra=None):
             data = body.encode("utf-8")
+            self.close_connection = True
             self.send_response(status)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(data)))
             self.send_header("Cache-Control", "no-store")
+            self.send_header("Connection", "close")
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Referrer-Policy", "no-referrer")
             self.send_header("X-Frame-Options", "DENY")

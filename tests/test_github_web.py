@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import http.client
+import os
 import re
 import sqlite3
 import tempfile
@@ -45,6 +46,7 @@ class GitHubFlowTest(unittest.TestCase):
         self.assertEqual(len(result["findings"]), 1)
         with tempfile.TemporaryDirectory() as temp:
             with connect(Path(temp) / "data.sqlite3") as db:
+                self.assertEqual(os.stat(Path(temp) / "data.sqlite3").st_mode & 0o777, 0o600)
                 authorize(db, REPO)
                 run_id = save_run(db, REPO, revision, result, source="github", verified_revision=True)
                 report = render_report(get_run(db, run_id))

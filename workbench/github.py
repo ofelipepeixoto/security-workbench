@@ -91,6 +91,7 @@ def inspect_github(repo: str, revision: str, *, repository_id: int, request_json
     dependencies: list[dict] = []
     digest = hashlib.sha256()
     files_read = total_bytes = 0
+    manifest: list[dict] = []
     seen: set[str] = set()
     for item in sorted(listing["tree"], key=lambda value: str(value.get("path", ""))):
         path = item.get("path")
@@ -124,6 +125,7 @@ def inspect_github(repo: str, revision: str, *, repository_id: int, request_json
             continue
         files_read += 1
         total_bytes += len(data)
+        manifest.append({"path": path, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()})
         digest.update(path.encode("utf-8", errors="replace") + b"\0")
         digest.update(hashlib.sha256(data).digest())
         found, packages = _inspect_text(path, data.decode("utf-8", errors="replace"))
@@ -133,5 +135,6 @@ def inspect_github(repo: str, revision: str, *, repository_id: int, request_json
         "repository_id": repository_id, "snapshot_digest": digest.hexdigest(), "files_read": files_read,
         "bytes_read": total_bytes, "partial": bool(omissions),
         "omissions": omissions[:50], "findings": findings, "dependencies": dependencies,
+        "manifest": manifest,
     }
 

@@ -32,7 +32,7 @@ python3 -m workbench compare --before ID_ANTERIOR --after ID_NOVO
 
 `--snapshot` aponta para arquivos obtidos por um meio já autorizado. Nesse modo, `--revision` continua uma declaração sem verificação externa. Em `scan-github`, a ferramenta confere a identidade do repositório, o commit e o hash Git dos arquivos efetivamente lidos. O operador atesta a autorização ao cadastrar o repositório; a ferramenta não verifica posse da conta. O banco local fica em `.data/workbench.sqlite3` e é ignorado pelo Git.
 
-Detecções iniciais: possível credencial atribuída em código e configurações de GitHub Actions com permissões amplas. A lista de dependências é apenas um inventário: ainda não há consulta de CVEs. Todo achado começa como `candidate`; só a revisão humana pode confirmá-lo. Valores de possíveis segredos não são salvos nem exibidos.
+Detecções iniciais: possível credencial atribuída em código e configurações de GitHub Actions com permissões amplas. A lista de dependências é apenas um inventário: ainda não há consulta de CVEs. Todo achado começa como `candidate`; só a revisão humana pode confirmá-lo. Nos achados, valores de possíveis segredos são omitidos. O estudo de propostas abaixo guarda diffs com código: trate esse conteúdo local como privado, sem promessa de redação integral.
 
 Arquivos grandes ou binários, pastas de dependências e links simbólicos são ignorados. O relatório informa quando a cobertura é parcial. Leia [escopo e critérios da etapa 1](docs/etapa-1.md) antes de usar. Não use o modo local como serviço público.
 
@@ -50,3 +50,11 @@ O escopo GitHub vincula nome e `repository_id` inteiro positivo. Mesmo nome com 
 Há migrações **SQLite locais**, idempotentes, em `workbench/store.py`: colunas `source`, `verified_revision` e `repository_id` em `runs`, e `repository_id` em `scope`. Não existem migrations Supabase nesta etapa. Dados anteriores são preservados, mas execuções sem ID perdem o rótulo de verificação de identidade.
 
 Veja [evidência real e limitação de transporte](docs/validacao-identidade.md). Os testes automatizados continuam simulados; a aquisição estática real por conector não comprova `scan-github` ponta a ponta.
+
+## Estudo de contexto e revisão (Plandex)
+
+A branch deste estudo acrescenta manifesto por arquivo, propostas de alteração para leitura e revisão persistente no SQLite local. Use os comandos `context-create`, `context-show`, `proposal-create`, `proposal-show`, `proposal-review` e `study-list`.
+
+A revisão exige uma nova análise da mesma base e o hash da proposta. Nenhuma alteração é aplicada ao alvo. Os novos comandos são CLI; a interface web anterior permanece com seu escopo original. Implementação original, sem importar o runtime Plandex, LLM ou n8n.
+
+Leia [o contrato, exemplos e limites](docs/plandex-study.md) e [a validação](docs/verificacao-plandex.md). Esta camada depende das PRs #1 e #2 e permanece pendente de revisão humana antes do merge.

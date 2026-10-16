@@ -70,12 +70,22 @@ def connect(state: Path) -> sqlite3.Connection:
             run_id TEXT NOT NULL REFERENCES runs(id), name TEXT NOT NULL,
             version TEXT NOT NULL, source TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS study_contexts (
+            id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES runs(id),
+            body TEXT NOT NULL, digest TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS study_proposals (
+            id TEXT PRIMARY KEY, context_id TEXT NOT NULL REFERENCES study_contexts(id),
+            body TEXT NOT NULL, digest TEXT NOT NULL, review TEXT
+        );
     """)
     columns = {row[1] for row in connection.execute("PRAGMA table_info(runs)")}
     if "source" not in columns:
         connection.execute("ALTER TABLE runs ADD COLUMN source TEXT NOT NULL DEFAULT 'local'")
     if "verified_revision" not in columns:
         connection.execute("ALTER TABLE runs ADD COLUMN verified_revision INTEGER NOT NULL DEFAULT 0")
+    if "manifest" not in columns:
+        connection.execute("ALTER TABLE runs ADD COLUMN manifest TEXT")
     for table in ("scope", "runs"):
         columns = {row[1] for row in connection.execute(f"PRAGMA table_info({table})")}
         if "repository_id" not in columns:
@@ -125,6 +135,8 @@ def save_run(db: sqlite3.Connection, repo: str, revision: str, result: dict, *, 
             datetime.now(timezone.utc).isoformat(), int(result["partial"]),
             result["files_read"], result["bytes_read"], json.dumps(result["omissions"]), source, int(verified_revision), repository_id,
         ))
+        if "manifest" in result:
+            db.execute("UPDATE runs SET manifest = ? WHERE id = ?", (json.dumps(result["manifest"]), run_id))
         for item in result["findings"]:
             db.execute("INSERT OR IGNORE INTO findings VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (
                 run_id, item["fingerprint"], item["kind"], item["path"], item["line"],
@@ -144,6 +156,7 @@ def get_run(db: sqlite3.Connection, run_id: str) -> dict:
         raise ValueError("Análise não encontrada.")
     result = dict(row)
     result["omissions"] = json.loads(result["omissions"])
+    result["manifest"] = json.loads(result["manifest"]) if result["manifest"] is not None else None
     result["findings"] = [dict(x) for x in db.execute(
         "SELECT * FROM findings WHERE run_id = ? ORDER BY path, line", (run_id,)
     )]

@@ -58,3 +58,7 @@ A branch deste estudo acrescenta manifesto por arquivo, propostas de alteração
 A revisão exige uma nova análise da mesma base e o hash da proposta. Nenhuma alteração é aplicada ao alvo. Os novos comandos são CLI; a interface web anterior permanece com seu escopo original. Implementação original, sem importar o runtime Plandex, LLM ou n8n.
 
 Leia [o contrato, exemplos e limites](docs/plandex-study.md) e [a validação](docs/verificacao-plandex.md). Esta camada depende das PRs #1 e #2 e permanece pendente de revisão humana antes do merge.
+
+## Plano offline Supabase
+
+O [catálogo por perfil](docs/supabase-study.md) cria um plano recuperável com evidências ainda pendentes, vinculado ao manifesto da análise. Não executa SQL nem conecta um banco.

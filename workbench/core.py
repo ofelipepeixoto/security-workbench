@@ -11,7 +11,7 @@ from pathlib import Path
 
 SKIP_DIRS = {".git", ".data", ".venv", "venv", "node_modules", "dist", "build", "__pycache__"}
 SKIP_NAMES = {".env", ".env.local", ".env.production"}
-TEXT_EXTENSIONS = {".py", ".js", ".jsx", ".ts", ".tsx", ".json", ".yml", ".yaml", ".txt", ".toml", ".ini", ".cfg"}
+TEXT_EXTENSIONS = {".sql", ".py", ".js", ".jsx", ".ts", ".tsx", ".json", ".yml", ".yaml", ".txt", ".toml", ".ini", ".cfg"}
 MAX_FILES = 5000
 MAX_TOTAL_BYTES = 25 * 1024 * 1024
 MAX_FILE_BYTES = 1024 * 1024

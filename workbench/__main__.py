@@ -92,6 +92,11 @@ def parser() -> argparse.ArgumentParser:
     proposal_review.add_argument("--reviewer", required=True)
     proposal_review.add_argument("--decision", choices=["accepted_for_study", "rejected"], required=True)
     sub.add_parser("study-list", help="Recuperar IDs dos 100 registros mais recentes de cada tipo")
+    supabase = sub.add_parser("supabase-plan", help="Planejar controles Supabase offline, sem executar SQL")
+    supabase.add_argument("--run", required=True)
+    supabase.add_argument("--path", action="append", required=True)
+    recovered = sub.add_parser("supabase-plan-show", help="Recuperar plano Supabase pelo contexto persistido")
+    recovered.add_argument("--context", required=True)
     return command
 
 
@@ -115,6 +120,10 @@ def main(argv: list[str] | None = None) -> int:
                 revision, result = inspect_github(repo, args.revision, repository_id=scoped_repository_id(db, repo))
                 run_id = save_run(db, repo, revision, result, source="github", verified_revision=True)
                 print(f"Análise {run_id}: {result['files_read']} arquivos, {len(result['findings'])} candidatos; parcial={result['partial']}")
+            elif args.action in {"supabase-plan", "supabase-plan-show"}:
+                from .supabase import create_plan, recover_plan
+                result = create_plan(db, args.run, args.path) if args.action == "supabase-plan" else recover_plan(db, args.context)
+                print(json.dumps(result, ensure_ascii=True, indent=2))
             elif args.action == "runs":
                 for row in db.execute("SELECT id, repo, revision, created_at, partial FROM runs ORDER BY created_at DESC"):
                     print(" | ".join(map(str, row)))

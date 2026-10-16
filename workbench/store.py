@@ -48,6 +48,11 @@ def connect(state: Path) -> sqlite3.Connection:
             version TEXT NOT NULL, source TEXT NOT NULL
         );
     """)
+    columns = {row[1] for row in connection.execute("PRAGMA table_info(runs)")}
+    if "source" not in columns:
+        connection.execute("ALTER TABLE runs ADD COLUMN source TEXT NOT NULL DEFAULT 'local'")
+    if "verified_revision" not in columns:
+        connection.execute("ALTER TABLE runs ADD COLUMN verified_revision INTEGER NOT NULL DEFAULT 0")
     return connection
 
 
@@ -65,14 +70,16 @@ def require_scope(db: sqlite3.Connection, repo: str) -> str:
     return repo
 
 
-def save_run(db: sqlite3.Connection, repo: str, revision: str, result: dict) -> str:
+def save_run(db: sqlite3.Connection, repo: str, revision: str, result: dict, *, source: str = "local", verified_revision: bool = False) -> str:
     repo = require_scope(db, repo)
+    if source not in {"local", "github"} or (verified_revision and source != "github"):
+        raise ValueError("Origem ou verificação inválida.")
     run_id = uuid.uuid4().hex[:16]
     with db:
-        db.execute("INSERT INTO runs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", (
+        db.execute("INSERT INTO runs (id, repo, revision, digest, created_at, partial, files_read, bytes_read, omissions, source, verified_revision) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (
             run_id, repo, revision, result["snapshot_digest"],
             datetime.now(timezone.utc).isoformat(), int(result["partial"]),
-            result["files_read"], result["bytes_read"], json.dumps(result["omissions"]),
+            result["files_read"], result["bytes_read"], json.dumps(result["omissions"]), source, int(verified_revision),
         ))
         for item in result["findings"]:
             db.execute("INSERT OR IGNORE INTO findings VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (

@@ -1,4 +1,4 @@
-"""CLI local, sem serviço de rede."""
+"""CLI local e interface restrita ao loopback."""
 
 from __future__ import annotations
 
@@ -8,17 +8,20 @@ import sys
 from pathlib import Path
 
 from .core import inspect_snapshot
+from .github import inspect_github
 from .store import authorize, compare, connect, get_run, review, require_scope, save_run
 
 
 def render_report(run: dict) -> str:
     coverage = "PARCIAL" if run["partial"] else "Limitada aos arquivos suportados"
+    verified = bool(run.get("verified_revision"))
     lines = [
         f"# Security Workbench — {run['repo']}", "",
-        f"Análise: `{run['id']}` · revisão declarada: `{run['revision']}`",
-        f"Digest da cópia lida: `{run['digest']}`",
+        f"Análise: `{run['id']}` · revisão {'verificada' if verified else 'declarada'}: `{run['revision']}`",
+        f"Origem: {run.get('source', 'local')} · digest dos arquivos lidos: `{run['digest']}`",
         f"Cobertura: **{coverage}** · {run['files_read']} arquivos / {run['bytes_read']} bytes", "",
-        "A revisão declarada não foi confrontada com o GitHub. Ausência de achados não comprova segurança.", "",
+        ("Identidade, commit e hashes dos arquivos lidos foram conferidos via API do GitHub. " if verified else
+         "A revisão declarada não foi confrontada com o GitHub. ") + "Ausência de achados não comprova segurança.", "",
         "## Achados", "",
     ]
     if not run["findings"]:
@@ -53,6 +56,11 @@ def parser() -> argparse.ArgumentParser:
     scan.add_argument("--snapshot", required=True, type=Path)
     scan.add_argument("--revision", required=True)
     scan.add_argument("--partial", action="store_true", help="Marcar cópia como subconjunto do repositório")
+    github = sub.add_parser("scan-github", help="Ler GitHub em modo somente leitura")
+    github.add_argument("--repo", required=True)
+    github.add_argument("--revision", required=True, help="SHA completo do commit (40 hexadecimais)")
+    serve = sub.add_parser("serve", help="Interface privada em 127.0.0.1")
+    serve.add_argument("--port", type=int, default=8765)
     sub.add_parser("runs", help="Listar análises")
     report = sub.add_parser("report", help="Exibir relatório Markdown")
     report.add_argument("--run", required=True)
@@ -69,6 +77,10 @@ def parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
     try:
+        if args.action == "serve":
+            from .web import serve
+            serve(args.state, args.port)
+            return 0
         with connect(args.state) as db:
             if args.action == "authorize":
                 print(f"Escopo cadastrado: {authorize(db, args.repo)}")
@@ -76,6 +88,11 @@ def main(argv: list[str] | None = None) -> int:
                 repo = require_scope(db, args.repo)
                 result = inspect_snapshot(args.snapshot, declared_partial=args.partial)
                 run_id = save_run(db, repo, args.revision, result)
+                print(f"Análise {run_id}: {result['files_read']} arquivos, {len(result['findings'])} candidatos; parcial={result['partial']}")
+            elif args.action == "scan-github":
+                repo = require_scope(db, args.repo)
+                revision, result = inspect_github(repo, args.revision)
+                run_id = save_run(db, repo, revision, result, source="github", verified_revision=True)
                 print(f"Análise {run_id}: {result['files_read']} arquivos, {len(result['findings'])} candidatos; parcial={result['partial']}")
             elif args.action == "runs":
                 for row in db.execute("SELECT id, repo, revision, created_at, partial FROM runs ORDER BY created_at DESC"):

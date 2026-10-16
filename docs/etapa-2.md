@@ -3,10 +3,10 @@
 ## Escopo implementado
 
 - Somente repositórios previamente cadastrados com declaração explícita de autorização.
-- `scan-github` requer SHA completo de commit, consulta `GET` na API oficial de repositório, commit, árvore recursiva e blobs. Confere `full_name`, identificador numérico, SHA do commit, SHA da árvore e SHA Git de cada blob lido. Não faz clone, executa arquivos, scripts ou hooks nem grava o código recebido no banco.
+- `scan-github` requer SHA completo de commit, consulta `GET` na API oficial de repositório, commit, árvore recursiva e blobs. Confere `full_name` e igualdade exata do `repository_id` positivo previamente autorizado, SHA do commit, SHA da árvore e SHA Git de cada blob lido. Não faz clone, executa arquivos, scripts ou hooks nem grava o código recebido no banco.
 - Os mesmos detectores estáticos e inventário de dependências da etapa 1 produzem candidatos com evidência sem valor de segredo, impacto possível, confiança e recomendação. Revisão humana e relatórios permanecem locais.
 - A interface `serve` escuta apenas em `127.0.0.1`, usa senha aleatória por execução e formulários com token CSRF, valida `Host` e `Origin`, limita corpo de requisição e escapa HTML. Permite cadastrar escopo, analisar, ver histórico, revisar achados e baixar Markdown.
-- Bancos da etapa 1 ganham colunas de origem e verificação; execuções antigas seguem marcadas como cópia local com revisão **não verificada**.
+- Bancos anteriores ganham colunas de origem, verificação e `repository_id`. A origem já registrada é preservada; execuções sem ID ficam com revisão **não verificada**, inclusive registros GitHub da versão anterior. IDs não são inferidos do nome. Revisar explicitamente o escopo permite novas aquisições e não altera a evidência histórica.
 
 ## Cobertura e limites
 
@@ -18,4 +18,6 @@
 
 ## Verificação desta entrega
 
-`python3 -m unittest discover -s tests -v`: 8 testes locais aprovados em 16/10/2026, incluindo respostas simuladas da API e fluxo HTTP local. A aquisição ao vivo pela API GitHub ainda não foi exercitada neste ambiente; a validação do próprio produto usa fixtures com SHA Git calculado sobre bytes de teste. Executar uma análise real de um commit autorizado em ambiente com acesso à API antes de tratar a integração como validada ponta a ponta.
+`python3 -m unittest discover -s tests -v`: 12 testes locais aprovados em 16/10/2026. Incluem API simulada, troca de ID 123→456, IDs inválidos/ausentes, migrações de ambas as versões anteriores, persistência, CLI e fluxo HTTP local com autenticação/CSRF.
+
+A [validação real](validacao-identidade.md) usa API pelo conector autorizado e uma cópia estática parcial de dois arquivos completos. O transporte direto de `scan-github` continua bloqueado no ambiente (`URLError`); não foi validado ponta a ponta nem substituído por credenciais do conector.

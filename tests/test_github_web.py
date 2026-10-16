@@ -39,7 +39,7 @@ def responses():
 class GitHubFlowTest(unittest.TestCase):
     def test_verified_commit_and_redacted_report(self):
         entries = responses()
-        revision, result = inspect_github(REPO, COMMIT, request_json=entries.__getitem__)
+        revision, result = inspect_github(REPO, COMMIT, repository_id=123, request_json=entries.__getitem__)
         self.assertEqual(revision, COMMIT)
         self.assertEqual(result["files_read"], 1)
         self.assertTrue(result["partial"])
@@ -47,7 +47,7 @@ class GitHubFlowTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             with connect(Path(temp) / "data.sqlite3") as db:
                 self.assertEqual(os.stat(Path(temp) / "data.sqlite3").st_mode & 0o777, 0o600)
-                authorize(db, REPO)
+                authorize(db, REPO, 123)
                 run_id = save_run(db, REPO, revision, result, source="github", verified_revision=True)
                 report = render_report(get_run(db, run_id))
                 self.assertIn("revisão verificada", report)
@@ -66,14 +66,14 @@ class GitHubFlowTest(unittest.TestCase):
                 entries = responses()
                 entries[path].update(patch)
                 with self.assertRaises(ValueError):
-                    inspect_github(REPO, COMMIT, request_json=entries.__getitem__)
+                    inspect_github(REPO, COMMIT, repository_id=123, request_json=entries.__getitem__)
         with self.assertRaises(ValueError):
-            inspect_github(REPO, "main", request_json=responses().__getitem__)
+            inspect_github(REPO, "main", repository_id=123, request_json=responses().__getitem__)
 
     def test_truncated_tree_and_old_database_migration(self):
         entries = responses()
         entries[f"/repos/{REPO}/git/trees/{TREE}?recursive=1"]["truncated"] = True
-        self.assertTrue(inspect_github(REPO, COMMIT, request_json=entries.__getitem__)[1]["partial"])
+        self.assertTrue(inspect_github(REPO, COMMIT, repository_id=123, request_json=entries.__getitem__)[1]["partial"])
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "legacy.sqlite3"
             with sqlite3.connect(path) as old:
@@ -88,7 +88,7 @@ class LocalWebTest(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.server, self.password = create_server(Path(self.temp.name) / "state.sqlite3", 0, scanner=lambda repo, sha: inspect_github(repo, sha, request_json=responses().__getitem__))
+        self.server, self.password = create_server(Path(self.temp.name) / "state.sqlite3", 0, scanner=lambda repo, sha, repository_id: inspect_github(repo, sha, repository_id=repository_id, request_json=responses().__getitem__))
         self.addCleanup(self.server.server_close)
         thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         thread.start()
@@ -113,17 +113,21 @@ class LocalWebTest(unittest.TestCase):
         self.assertEqual(status, 200)
         csrf = re.search(r"name='csrf' value='([^']+)'", page).group(1)
         post_headers = {**headers, "Content-Type": "application/x-www-form-urlencoded", "Origin": f"http://{host}"}
-        self.assertEqual(self.request("POST", "/authorize", urlencode({"repo": REPO, "owned": "yes", "csrf": "wrong"}), post_headers)[0], 403)
-        self.assertEqual(self.request("POST", "/authorize", urlencode({"repo": REPO, "owned": "yes", "csrf": csrf}), {**post_headers, "Origin": "http://evil.test"})[0], 403)
-        self.assertEqual(self.request("POST", "/authorize", urlencode({"repo": REPO, "owned": "yes", "csrf": csrf}), post_headers)[0], 200)
+        self.assertEqual(self.request("POST", "/authorize", urlencode({"repo": REPO, "repository_id": "123", "owned": "yes", "csrf": "wrong"}), post_headers)[0], 403)
+        self.assertEqual(self.request("POST", "/authorize", urlencode({"repo": REPO, "repository_id": "123", "owned": "yes", "csrf": csrf}), {**post_headers, "Origin": "http://evil.test"})[0], 403)
+        self.assertEqual(self.request("POST", "/authorize", urlencode({"repo": REPO, "repository_id": "123", "owned": "yes", "csrf": csrf}), post_headers)[0], 200)
+        for identity in ("", "0", "-1", "true", "456"):
+            self.assertEqual(self.request("POST", "/authorize", urlencode({"repo": REPO, "repository_id": identity, "owned": "yes", "csrf": csrf}), post_headers)[0], 400)
         status, page = self.request("POST", "/scan", urlencode({"repo": REPO, "revision": COMMIT, "csrf": csrf}), post_headers)
         self.assertEqual(status, 200)
         run_id = re.search(r"Análise ([0-9a-f]{16})", page).group(1)
         status, report = self.request("GET", f"/report/{run_id}.md", headers=headers)
         self.assertEqual(status, 200)
         self.assertIn("revisão verificada", report)
+        self.assertIn("Repository ID: 123", report)
         self.assertNotIn("fixture-not-a-real-credential", report)
 
 
 if __name__ == "__main__":
     unittest.main()
+

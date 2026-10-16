@@ -14,7 +14,7 @@ from pathlib import PurePosixPath
 
 from .core import (MAX_FILE_BYTES, MAX_FILES, MAX_TOTAL_BYTES, SKIP_DIRS,
                    SKIP_NAMES, TEXT_EXTENSIONS, _inspect_text)
-from .store import normalize_repo
+from .store import normalize_repo, validate_repository_id
 
 SHA = re.compile(r"^[0-9a-fA-F]{40}$")
 MAX_RESPONSE = 8 * 1024 * 1024
@@ -65,14 +65,15 @@ def _eligible(path: str) -> bool:
     return PurePosixPath(path).suffix.lower() in TEXT_EXTENSIONS or parts[-1] in {"requirements.txt", "Dockerfile"}
 
 
-def inspect_github(repo: str, revision: str, *, request_json=None) -> tuple[str, dict]:
+def inspect_github(repo: str, revision: str, *, repository_id: int, request_json=None) -> tuple[str, dict]:
     """Require a full commit SHA; verify repo identity, commit tree and every consumed blob."""
+    repository_id = validate_repository_id(repository_id)
     repo = normalize_repo(repo)
     revision = _sha(revision)
     fetch = request_json or _request_json
     prefix = f"/repos/{repo}"
     metadata = fetch(prefix)
-    if normalize_repo(metadata.get("full_name", "")) != repo or not isinstance(metadata.get("id"), int):
+    if normalize_repo(metadata.get("full_name", "")) != repo or validate_repository_id(metadata.get("id")) != repository_id:
         raise ValueError("Identidade do repositório divergente.")
     commit = fetch(f"{prefix}/git/commits/{revision}")
     if _sha(commit.get("sha")) != revision:
@@ -129,7 +130,8 @@ def inspect_github(repo: str, revision: str, *, request_json=None) -> tuple[str,
         findings.extend(found)
         dependencies.extend(packages)
     return revision, {
-        "snapshot_digest": digest.hexdigest(), "files_read": files_read,
+        "repository_id": repository_id, "snapshot_digest": digest.hexdigest(), "files_read": files_read,
         "bytes_read": total_bytes, "partial": bool(omissions),
         "omissions": omissions[:50], "findings": findings, "dependencies": dependencies,
     }
+

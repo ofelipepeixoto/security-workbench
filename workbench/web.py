@@ -13,7 +13,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from .github import inspect_github
-from .store import authorize, connect, get_run, require_scope, review, save_run
+from .store import authorize, connect, get_run, require_scope, review, save_run, scoped_repository_id
 
 
 def h(value: object) -> str:
@@ -82,14 +82,14 @@ def create_server(state: Path, port: int = 8765, *, scanner=inspect_github):
                         options = "".join(f"<option value='{h(repo)}'>{h(repo)}</option>" for repo in scopes)
                         history = "".join(f"<li><a href='/run/{h(row['id'])}'>{h(row['repo'])} · {h(row['id'])}</a> · {h(row['files_read'])} arquivos · {'parcial' if row['partial'] else 'limitada'}</li>" for row in runs)
                         token = h(csrf)
-                        content = f"<p>Uso pessoal no próprio computador. A análise lê arquivos do GitHub sem executá-los. Informe o SHA completo do commit.</p><section><h2>1. Cadastrar autorização</h2><form method='post' action='/authorize'><input type='hidden' name='csrf' value='{token}'><label>Repositório seu (owner/repo)<br><input name='repo' type='text' required></label><br><label><input type='checkbox' name='owned' value='yes' required>Confirmo que tenho autorização para analisar este repositório.</label><br><button>Cadastrar</button></form></section><section><h2>2. Analisar commit</h2><form method='post' action='/scan'><input type='hidden' name='csrf' value='{token}'><label>Escopo <select name='repo' required>{options}</select></label><br><label>SHA do commit (40 caracteres)<br><input name='revision' type='text' minlength='40' maxlength='40' required></label><br><button>Iniciar análise</button></form><small>Para repositórios privados, configure GITHUB_TOKEN no ambiente antes de iniciar o servidor. Não cole tokens nesta página.</small></section><section><h2>Histórico</h2><ul>{history or '<li>Nenhuma análise.</li>'}</ul></section>"
+                        content = f"<p>Uso pessoal no próprio computador. A análise lê arquivos do GitHub sem executá-los. Informe o SHA completo do commit.</p><section><h2>1. Cadastrar autorização</h2><form method='post' action='/authorize'><input type='hidden' name='csrf' value='{token}'><label>Repositório seu (owner/repo)<br><input name='repo' type='text' required></label><br><label>ID numérico do repositório, revisado explicitamente<br><input name='repository_id' type='number' min='1' step='1' required></label><br><label><input type='checkbox' name='owned' value='yes' required>Confirmo que tenho autorização para analisar este repositório.</label><br><button>Cadastrar</button></form></section><section><h2>2. Analisar commit</h2><form method='post' action='/scan'><input type='hidden' name='csrf' value='{token}'><label>Escopo <select name='repo' required>{options}</select></label><br><label>SHA do commit (40 caracteres)<br><input name='revision' type='text' minlength='40' maxlength='40' required></label><br><button>Iniciar análise</button></form><small>Para repositórios privados, configure GITHUB_TOKEN no ambiente antes de iniciar o servidor. Não cole tokens nesta página.</small></section><section><h2>Histórico</h2><ul>{history or '<li>Nenhuma análise.</li>'}</ul></section>"
                         self._page("Security Workbench", content)
                     elif path.startswith("/run/"):
                         run_id = path.removeprefix("/run/")
                         run = get_run(db, run_id)
                         findings = "".join(f"<section><h3>{h(item['kind'])} · {h(item['path'])}:{h(item['line'])}</h3><p>{h(item['evidence'])}</p><p>Impacto possível: {h(item['impact'])}</p><p>Confiança: {h(item['confidence'])} · Estado: {h(item['status'])}</p><p>Recomendação: {h(item['recommendation'])}</p><form method='post' action='/review'><input type='hidden' name='csrf' value='{h(csrf)}'><input type='hidden' name='run' value='{h(run_id)}'><input type='hidden' name='finding' value='{h(item['fingerprint'])}'><select name='decision'><option value='candidate'>Candidato</option><option value='confirmed'>Confirmado após revisão</option><option value='false_positive'>Falso positivo</option><option value='accepted_risk'>Risco aceito</option></select><button>Salvar revisão</button></form></section>" for item in run["findings"])
                         omissions = "".join(f"<li>{h(item)}</li>" for item in run["omissions"])
-                        content = f"<p>Repositório: {h(run['repo'])} · Commit: <code>{h(run['revision'])}</code></p><p>Origem: {h(run['source'])} · verificado: {'sim' if run['verified_revision'] else 'não'} · cobertura parcial: {'sim' if run['partial'] else 'não'} · {h(run['files_read'])} arquivos</p><p><a href='/report/{h(run_id)}.md'>Baixar relatório Markdown</a></p><h2>Achados candidatos e revisão</h2>{findings or '<p>Nenhum candidato nos arquivos lidos.</p>'}<h2>Limitações</h2><ul>{omissions or '<li>Regras e tipos de arquivo limitados; ausência de achados não comprova segurança.</li>'}</ul>"
+                        content = f"<p>Repositório: {h(run['repo'])} · Commit: <code>{h(run['revision'])}</code></p><p>Repository ID: {h(run['repository_id'])} · Origem: {h(run['source'])} · verificado: {'sim' if run['verified_revision'] else 'não'} · cobertura parcial: {'sim' if run['partial'] else 'não'} · {h(run['files_read'])} arquivos</p><p><a href='/report/{h(run_id)}.md'>Baixar relatório Markdown</a></p><h2>Achados candidatos e revisão</h2>{findings or '<p>Nenhum candidato nos arquivos lidos.</p>'}<h2>Limitações</h2><ul>{omissions or '<li>Regras e tipos de arquivo limitados; ausência de achados não comprova segurança.</li>'}</ul>"
                         self._page("Análise", content)
                     elif path.startswith("/report/") and path.endswith(".md"):
                         from .__main__ import render_report
@@ -120,14 +120,14 @@ def create_server(state: Path, port: int = 8765, *, scanner=inspect_github):
                     if path == "/authorize":
                         if one("owned") != "yes":
                             raise ValueError("Confirme a autorização.")
-                        repo = authorize(db, one("repo"))
+                        repo = authorize(db, one("repo"), int(one("repository_id")))
                         message = f"Escopo cadastrado: {repo}"
                     elif path == "/scan":
                         repo = require_scope(db, one("repo"))
                         if not scan_lock.acquire(blocking=False):
                             raise ValueError("Já há uma análise em andamento.")
                         try:
-                            revision, result = scanner(repo, one("revision"))
+                            revision, result = scanner(repo, one("revision"), repository_id=scoped_repository_id(db, repo))
                             run_id = save_run(db, repo, revision, result, source="github", verified_revision=True)
                         finally:
                             scan_lock.release()
@@ -156,3 +156,4 @@ def serve(state: Path, port: int = 8765):
         server.serve_forever()
     finally:
         server.server_close()
+

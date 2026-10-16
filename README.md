@@ -10,7 +10,7 @@ Requer Python 3.12; não há dependências externas. No diretório do projeto:
 python3 -m workbench serve
 ```
 
-Abra o endereço `http://127.0.0.1:8765/` **no mesmo computador** e use o usuário `operator` e a senha temporária exibida no terminal. Cadastre apenas um repositório que você controla ou tem autorização explícita para analisar. Copie o SHA completo de um commit (40 caracteres) da página do repositório para iniciar a análise. Depois abra a análise, revise candidatos e baixe o relatório Markdown. Não coloque essa interface atrás de proxy nem a exponha à internet: a conexão local usa HTTP e a senha não substitui HTTPS para acesso remoto.
+Abra o endereço `http://127.0.0.1:8765/` **no mesmo computador** e use o usuário `operator` e a senha temporária exibida no terminal. Informe o ID numérico estável retornado pelo campo `id` de `GET /repos/owner/repo`, após conferir a identidade. Cadastre apenas um repositório que você controla ou tem autorização explícita para analisar. Copie o SHA completo de um commit (40 caracteres) da página do repositório para iniciar a análise. Depois abra a análise, revise candidatos e baixe o relatório Markdown. Não coloque essa interface atrás de proxy nem a exponha à internet: a conexão local usa HTTP e a senha não substitui HTTPS para acesso remoto.
 
 Para repositórios privados, a API do GitHub requer um token de acesso com permissão de **leitura de conteúdo** naquele repositório. Configure `GITHUB_TOKEN` no ambiente do processo, conforme o gerenciador de segredos do seu computador; não inclua o token nos comandos exemplificados, no chat ou nos arquivos versionados. Para repositórios públicos, o acesso pode funcionar sem token, sujeito ao limite da API. A integração GitHub do ChatGPT não fornece automaticamente credenciais ao processo local.
 
@@ -21,7 +21,7 @@ Veja [aquisição GitHub e limites](docs/etapa-2.md).
 Requer Python 3.12. Não há dependências externas nesta etapa.
 
 ```bash
-python3 -m workbench authorize --repo ofelipepeixoto/rea --confirm-owned
+python3 -m workbench authorize --repo ofelipepeixoto/rea --repository-id 1417322346 --confirm-owned
 python3 -m workbench scan --repo ofelipepeixoto/rea --snapshot /caminho/para/copia/rea --revision COMMIT_COMPLETO
 python3 -m workbench scan-github --repo ofelipepeixoto/rea --revision SHA_COMPLETO_DE_40_CARACTERES
 python3 -m workbench runs
@@ -43,3 +43,10 @@ python3 -m unittest discover -s tests -v
 ```
 
 Os testes usam valores artificiais e respostas simuladas da API. Verificam autorização, ausência de execução do alvo, redação dos valores, revisão, comparação, identidade e hashes da aquisição, migração do banco e proteção básica da interface. Ainda não são uma execução real contra a API do GitHub.
+
+
+O escopo GitHub vincula nome e `repository_id` inteiro positivo. Mesmo nome com outro ID é recusado antes de ler commits/blobs. Cadastros locais sem ID continuam válidos para `scan`, mas bloqueiam `scan-github` até repetir `authorize` com ID revisado explicitamente. Um ID já vinculado não pode ser substituído por recadastro. As execuções guardam seu próprio ID; rever o escopo não promove o histórico antigo a verificado.
+
+Há migrações **SQLite locais**, idempotentes, em `workbench/store.py`: colunas `source`, `verified_revision` e `repository_id` em `runs`, e `repository_id` em `scope`. Não existem migrations Supabase nesta etapa. Dados anteriores são preservados, mas execuções sem ID perdem o rótulo de verificação de identidade.
+
+Veja [evidência real e limitação de transporte](docs/validacao-identidade.md). Os testes automatizados continuam simulados; a aquisição estática real por conector não comprova `scan-github` ponta a ponta.

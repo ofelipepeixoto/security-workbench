@@ -9,15 +9,16 @@ from pathlib import Path
 
 from .core import inspect_snapshot
 from .github import inspect_github
-from .store import authorize, compare, connect, get_run, review, require_scope, save_run
+from .store import authorize, compare, connect, get_run, review, require_scope, save_run, scoped_repository_id
 
 
 def render_report(run: dict) -> str:
     coverage = "PARCIAL" if run["partial"] else "Limitada aos arquivos suportados"
-    verified = bool(run.get("verified_revision"))
+    verified = bool(run.get("verified_revision")) and type(run.get("repository_id")) is int and run["repository_id"] > 0
     lines = [
         f"# Security Workbench — {run['repo']}", "",
         f"Análise: `{run['id']}` · revisão {'verificada' if verified else 'declarada'}: `{run['revision']}`",
+        f"Repository ID: {run.get('repository_id') or 'não verificado'}",
         f"Origem: {run.get('source', 'local')} · digest dos arquivos lidos: `{run['digest']}`",
         f"Cobertura: **{coverage}** · {run['files_read']} arquivos / {run['bytes_read']} bytes", "",
         ("Identidade, commit e hashes dos arquivos lidos foram conferidos via API do GitHub. " if verified else
@@ -50,6 +51,7 @@ def parser() -> argparse.ArgumentParser:
     sub = command.add_subparsers(dest="action", required=True)
     allowed = sub.add_parser("authorize", help="Registrar declaração de autorização")
     allowed.add_argument("--repo", required=True)
+    allowed.add_argument("--repository-id", type=int, help="ID GitHub revisado explicitamente; obrigatório para aquisição GitHub")
     allowed.add_argument("--confirm-owned", action="store_true", required=True)
     scan = sub.add_parser("scan", help="Inspecionar uma cópia local")
     scan.add_argument("--repo", required=True)
@@ -83,7 +85,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         with connect(args.state) as db:
             if args.action == "authorize":
-                print(f"Escopo cadastrado: {authorize(db, args.repo)}")
+                print(f"Escopo cadastrado: {authorize(db, args.repo, args.repository_id)}")
             elif args.action == "scan":
                 repo = require_scope(db, args.repo)
                 result = inspect_snapshot(args.snapshot, declared_partial=args.partial)
@@ -91,7 +93,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"Análise {run_id}: {result['files_read']} arquivos, {len(result['findings'])} candidatos; parcial={result['partial']}")
             elif args.action == "scan-github":
                 repo = require_scope(db, args.repo)
-                revision, result = inspect_github(repo, args.revision)
+                revision, result = inspect_github(repo, args.revision, repository_id=scoped_repository_id(db, repo))
                 run_id = save_run(db, repo, revision, result, source="github", verified_revision=True)
                 print(f"Análise {run_id}: {result['files_read']} arquivos, {len(result['findings'])} candidatos; parcial={result['partial']}")
             elif args.action == "runs":
@@ -112,3 +114,4 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

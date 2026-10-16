@@ -107,6 +107,7 @@ def inspect_snapshot(snapshot: Path, *, declared_partial: bool = False) -> dict:
     digest = hashlib.sha256()
     files_read = 0
     total_bytes = 0
+    manifest: list[dict] = []
     stop = False
     for current, dirs, files in os.walk(root, followlinks=False):
         dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS and not (Path(current) / d).is_symlink())
@@ -139,6 +140,7 @@ def inspect_snapshot(snapshot: Path, *, declared_partial: bool = False) -> dict:
                 continue
             files_read += 1
             total_bytes += len(data)
+            manifest.append({"path": relative, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()})
             digest.update(relative.encode("utf-8", errors="replace") + b"\0")
             digest.update(hashlib.sha256(data).digest())
             items, packages = _inspect_text(relative, data.decode("utf-8", errors="replace"))
@@ -154,4 +156,5 @@ def inspect_snapshot(snapshot: Path, *, declared_partial: bool = False) -> dict:
         "omissions": omissions[:50],
         "findings": findings,
         "dependencies": dependencies,
+        "manifest": manifest,
     }

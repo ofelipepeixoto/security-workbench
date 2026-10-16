@@ -73,6 +73,25 @@ def parser() -> argparse.ArgumentParser:
     diff = sub.add_parser("compare", help="Comparar impressões digitais entre análises")
     diff.add_argument("--before", required=True)
     diff.add_argument("--after", required=True)
+    context = sub.add_parser("context-create", help="Fixar contexto limitado para estudo")
+    context.add_argument("--run", required=True)
+    context.add_argument("--path", action="append", required=True)
+    context.add_argument("--task", required=True)
+    context_show = sub.add_parser("context-show", help="Consultar manifesto persistido")
+    context_show.add_argument("--context", required=True)
+    proposal = sub.add_parser("proposal-create", help="Gerar diff para revisão, sem aplicar")
+    proposal.add_argument("--context", required=True)
+    proposal.add_argument("--snapshot", type=Path, required=True)
+    proposal.add_argument("--spec", type=Path, required=True)
+    proposal_show = sub.add_parser("proposal-show", help="Consultar proposta local, incluindo diff")
+    proposal_show.add_argument("--proposal", required=True)
+    proposal_review = sub.add_parser("proposal-review", help="Registrar revisão de estudo, sem execução")
+    proposal_review.add_argument("--proposal", required=True)
+    proposal_review.add_argument("--current-run", required=True)
+    proposal_review.add_argument("--expected-hash", required=True)
+    proposal_review.add_argument("--reviewer", required=True)
+    proposal_review.add_argument("--decision", choices=["accepted_for_study", "rejected"], required=True)
+    sub.add_parser("study-list", help="Recuperar IDs dos 100 registros mais recentes de cada tipo")
     return command
 
 
@@ -106,6 +125,28 @@ def main(argv: list[str] | None = None) -> int:
                 print("Revisão registrada.")
             elif args.action == "compare":
                 print(json.dumps(compare(db, args.before, args.after), ensure_ascii=False, indent=2))
+            elif args.action in {"context-create", "context-show", "proposal-create", "proposal-show", "proposal-review", "study-list"}:
+                from .changes import create_context, create_proposal, get_context, get_proposal, load_spec, review_proposal
+                if args.action == "context-create":
+                    record = create_context(db, args.run, args.path, args.task)
+                    result = {"id": record["id"], "sha256": record["sha256"]}
+                elif args.action == "context-show":
+                    result = get_context(db, args.context)
+                elif args.action == "proposal-create":
+                    record = create_proposal(db, args.context, args.snapshot, load_spec(args.spec))
+                    result = {"id": record["id"], "sha256": record["sha256"], "external_effects": False}
+                elif args.action == "proposal-show":
+                    result = get_proposal(db, args.proposal)
+                elif args.action == "proposal-review":
+                    record = review_proposal(db, args.proposal, args.current_run, args.expected_hash, args.reviewer, args.decision)
+                    result = record["review"]
+                else:
+                    result = {"contexts": [], "proposals": []}
+                    for table, key, getter in [("study_contexts", "contexts", get_context), ("study_proposals", "proposals", get_proposal)]:
+                        for row in db.execute(f"SELECT id FROM {table} ORDER BY rowid DESC LIMIT 100"):
+                            record = getter(db, row["id"])
+                            result[key].append({"id": record["id"], "sha256": record["sha256"], "repo": record["document"]["base"]["repo"]})
+                print(json.dumps(result, ensure_ascii=True, indent=2))
     except (ValueError, PermissionError, OSError) as exc:
         print(f"Erro: {exc}", file=sys.stderr)
         return 2

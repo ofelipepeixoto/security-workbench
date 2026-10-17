@@ -1,6 +1,6 @@
 # Security Workbench
 
-Plataforma privada em construção para inspecionar ativos **autorizados**. O núcleo local analisa cópias ou lê arquivos de um commit específico pelo GitHub, sem executar código do alvo. Os resultados ficam em SQLite local.
+Plataforma experimental em construção para inspecionar ativos **autorizados**. O núcleo local analisa cópias ou lê arquivos de um commit específico pelo GitHub, sem executar código do alvo. Os resultados ficam em SQLite local.
 
 ## Site e demonstração online
 
@@ -8,7 +8,7 @@ Plataforma privada em construção para inspecionar ativos **autorizados**. O n�
 
 Para a operação real, o proprietário acessa a área autenticada com ChatGPT. O Site exige identidade no servidor antes de ler ou modificar projetos, análises e relatórios. Nesta versão hospedada, somente repositórios **públicos** de `ofelipepeixoto` podem ser cadastrados após confirmação de escopo. A aquisição fixa o commit, confere identidade e hashes e lê até 20 arquivos suportados; lacunas aparecem como cobertura parcial. Não há auditoria completa de CVEs nem execução de código do alvo. A leitura pública da API GitHub está sujeita à cota compartilhada por IP.
 
-O Site público é distinto desta interface Python local e do banco SQLite: a área hospedada usa D1 isolado. [Estado da publicação e verificações](docs/sistema-web-privado.md) · [PR #8 em rascunho](https://github.com/ofelipepeixoto/security-workbench/pull/8). O repositório continua **privado**; o link do código requer permissão no GitHub. Não inserir segredos ou dados sensíveis na demonstração.
+O Site público é distinto desta interface Python local e do banco SQLite: a área hospedada usa D1 isolado. [Estado da publicação e verificações](docs/sistema-web-privado.md). A visibilidade do repositório e a audiência do Site são independentes. Não inserir segredos ou dados sensíveis na demonstração.
 
 ## Interface local
 
@@ -60,3 +60,7 @@ Há migrações **SQLite locais**, idempotentes, em `workbench/store.py`: coluna
 Veja a [evidência histórica de identidade](docs/validacao-identidade.md), as [correções de proteção da aquisição](docs/protecoes-aquisicao.md) e a [validação do transporte real](docs/validacao-transporte.md).
 
 O job `github-live` usa a credencial temporária do GitHub Actions, limitada à leitura do próprio Workbench, para executar o cliente real pela CLI e pela interface HTTP em loopback. Não é preciso criar um token pessoal para esse teste. A autenticação do processo local no seu computador continua separada, conforme as instruções acima. O ambiente de teste é Linux com Python 3.12; Windows ainda não foi homologado.
+
+## Comunidade e licença
+
+O código autoral está sob [licença MIT](LICENSE); avisos de terceiros são preservados no diretório `web/`. Veja [a origem do adaptador e do starter](web/PROVENANCE.md), o [guia de contribuição](CONTRIBUTING.md) e a [política de segurança](SECURITY.md). Esta versão é experimental: reporte falhas do próprio Workbench por canal privado e não divulgue dados de alvos em issues.

@@ -4,7 +4,7 @@
 
 O job `github-live` em `.github/workflows/checks.yml` executa `python -m scripts.smoke_github` após os testes locais, em PRs originados no próprio repositório. O token temporário do job recebe somente `contents: read`, não é salvo no checkout e é passado apenas ao passo de smoke. Não há token pessoal, nova credencial persistente, agendamento, publicação ou deploy.
 
-Alvo fixado e autorizado: repositório privado `ofelipepeixoto/security-workbench`, ID `1419403320`, commit completo `c8489f1a9fa73aafa8ecbb010281488815128801` (versão enviada do PR #2). Um preflight exige que o repositório continue privado. O cliente da aplicação confere nome/ID, commit, árvore e hash Git de cada arquivo consumido. Não se usa replay do conector nem mock neste job.
+Alvo fixado e autorizado: repositório `ofelipepeixoto/security-workbench`, ID `1419403320`, commit completo `c8489f1a9fa73aafa8ecbb010281488815128801` (versão enviada do PR #2). Desde a abertura pública, o preflight exige `private: false`; antes dela exigia `private: true`. O cliente da aplicação confere nome/ID, commit, árvore e hash Git de cada arquivo consumido. Não se usa replay do conector nem mock neste job.
 
 1. CLI em subprocesso real: autorização, `scan-github`, persistência de identidade/revisão verificada e geração de relatório.
 2. HTTP local real: servidor em loopback com senha temporária, recusa de acesso sem senha e de origem divergente, cadastro de escopo, nova aquisição pelo scanner padrão, histórico, página da análise e download de relatório.
@@ -19,7 +19,7 @@ Os **17 testes locais** passaram em 17/10/2026. No [GitHub Actions run 390616850
 | Evidência do job real | Resultado |
 | --- | --- |
 | Transporte | HTTPS direto do cliente da aplicação à API GitHub |
-| Identidade | `ofelipepeixoto/security-workbench`, ID `1419403320`, privado confirmado |
+| Identidade | `ofelipepeixoto/security-workbench`, ID `1419403320`, privado naquele run |
 | Commit alvo | `c8489f1a9fa73aafa8ecbb010281488815128801` |
 | Fluxos | CLI em subprocesso + servidor HTTP loopback, ambos com scanner real |
 | Aquisições | 2 independentes |
@@ -37,11 +37,13 @@ O `partial=false` do resumo significa que não houve omissão adicional nos form
 - O alvo é um único commit do próprio Workbench, nos formatos suportados. Não é uma auditoria completa de segurança, nem uma análise real integral do REA.
 - O fluxo HTTP é testado programaticamente no runner Linux; não comprova usabilidade visual no navegador, funcionamento no Windows ou autenticação de um processo no computador do usuário.
 - Revisão humana de achados não é substituída pelo smoke. Contagens de candidatos não são vulnerabilidades confirmadas. Inventário não consulta CVEs.
-- A interface continua exclusiva de loopback/HTTP; não há operação remota homologada. Os PRs #3 e #4, de estudos Plandex/Supabase, são camadas distintas e não fazem parte deste alvo.
+- Esse fluxo HTTP era exclusivamente loopback; não valida o aplicativo hospedado. Os PRs #3 e #4, de estudos Plandex/Supabase, são camadas distintas e não fazem parte deste alvo.
 - Ordem desta entrega: #1 → #2 → #5 (proteções) → PR de smoke dependente de #5. Os PRs #3/#4 permanecem em suas branches; eventual integração conjunta exigirá atualizar e validar as dependências, sem reescrever histórico automaticamente.
 
 Documentação oficial consultada em 17/10/2026: [GITHUB_TOKEN](https://docs.github.com/en/actions/concepts/security/github_token) e [permissões mínimas](https://docs.github.com/en/actions/tutorials/authenticate-with-github_token).
 
-## Preparação para visibilidade pública
+## Smoke após a abertura pública
 
-Esta evidência foi produzida quando o Workbench ainda era privado. Depois da abertura autorizada, o smoke passa a exigir `private: false` da API antes de ler commits e blobs. O job continua restrito aos PRs do próprio repositório, ao nome, ID e commit fixos, com token temporário de leitura do Actions. O resultado do primeiro run público será registrado somente após sua conclusão; os números acima são históricos da execução privada.
+O [run 39071494798 do PR #10](https://github.com/ofelipepeixoto/security-workbench/actions/runs/39071494798), em 17/10/2026, concluiu com `success` nos jobs `test`, `github-live` e `web-scanner`. O preflight confirmou `private: false`. O log do job `github-live` registrou HTTPS direto à API GitHub, ID `1419403320`, o mesmo commit alvo, dois fluxos (`cli` e `loopback_http`), duas aquisições, 10 arquivos/57.815 bytes por execução, três candidatos por execução, zero dependências reconhecidas e comparação do mesmo commit aprovada. O digest permaneceu `2ff872b507b0ea872ae3b584c1f5ce1bd1dbef9eec6c1e57edf316ce10671e15`; `partial=false` significa apenas que os formatos suportados não sofreram omissão adicional nesse run.
+
+Esse run valida a aquisição e o smoke no Actions com o repositório já público. Não confirma vulnerabilidades, cobertura integral, revisão humana hospedada ou download pelo navegador. O job continua restrito aos PRs do próprio repositório, ao nome, ID e commit fixos, com token temporário de leitura do Actions.

@@ -1,12 +1,12 @@
-# Security Workbench — área privada web
+# Security Workbench — demonstração pública e área de operação protegida
 
 Adaptador web do núcleo Python/SQLite do Workbench, na linha do PR #6. O runtime de Sites usa JavaScript/Workers; o núcleo original e os bancos locais permanecem preservados.
 
 ## Jornada
 
-Entrar com ChatGPT → adicionar link de repositório público próprio → conferir identidade e autorizar escopo → analisar versão atual ou SHA específico → revisar candidatos → baixar Markdown → comparar histórico.
+Visitante: abrir a [demonstração pública](https://security-workbench.camaleaoweb3.com.br/) sem login e selecionar **Explorar exemplo**. Proprietário autenticado: adicionar link de repositório público próprio → conferir identidade e autorizar escopo → analisar versão atual ou SHA específico → revisar candidatos → baixar Markdown → comparar histórico.
 
-O modo **Demonstração** usa dados fictícios em memória: não analisa repositórios nem grava dados no servidor. Na operação real, a API protege POST por origem e vincula todos os registros à identidade fornecida pela plataforma. O site deve permanecer privado e restrito ao proprietário.
+O modo **Demonstração** usa dados fictícios em memória: não analisa repositórios nem grava dados no servidor. A audiência do Site é pública, mas a API da operação real exige identidade ChatGPT no servidor, protege POST por origem e vincula os registros ao usuário. Publicar o código-fonte é decisão separada da visibilidade do Site.
 
 ## Escopo
 
@@ -31,4 +31,4 @@ Veja `PROVENANCE.md`. A base é o starter oficial Sites 1.0.1. O build segue `no
 
 `tests/live-smoke.mjs` é separado dos mocks e restrito ao Actions do Workbench. Fixa REA ID `1417322346` e commit `3e7c6302233ecbcb9b92e43ee5a60337738961bd`, sem conteúdo alvo nos logs.
 
-Versão salva para revisão, sem implantação automática. Login/persistência hospedados serão homologados após publicação privada autorizada. Credenciais, bancos, fonte alvo e estado de QA ficam fora do pacote.
+Versão 9 publicada no Site com domínio e HTTPS ativos. O proprietário executou uma análise parcial real do REA na hospedagem; revisão de candidato real e comparação de duas análises hospedadas continuam sem homologação. [Estado verificado e limites](../docs/sistema-web-privado.md). Credenciais, bancos, fonte alvo e estado de QA ficam fora do pacote.

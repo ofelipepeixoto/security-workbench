@@ -14,3 +14,25 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m unittest discover -s tests -v
+  github-live:
+    # Credencial somente do próprio repositório; nenhum segredo de usuário.
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.repository == 'ofelipepeixoto/security-workbench' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - name: Aquisição real privada pela CLI e HTTP local
+        run: python -m scripts.smoke_github
+        env:
+          GITHUB_TOKEN: ${{ github.token }}

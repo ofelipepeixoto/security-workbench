@@ -1,21 +1,36 @@
 # Security Workbench
 
-Plataforma privada em construção para inspecionar ativos **autorizados**. Esta primeira entrega é um núcleo local, de um operador, que analisa uma cópia de arquivos de um repositório sem executar código do alvo ou enviar arquivos a um serviço externo.
+Plataforma privada em construção para inspecionar ativos **autorizados**. O núcleo local analisa cópias ou lê arquivos de um commit específico pelo GitHub, sem executar código do alvo. Os resultados ficam em SQLite local.
 
-## Primeiro fluxo
+## Interface local
+
+Requer Python 3.12; não há dependências externas. No diretório do projeto:
+
+```bash
+python3 -m workbench serve
+```
+
+Abra o endereço `http://127.0.0.1:8765/` **no mesmo computador** e use o usuário `operator` e a senha temporária exibida no terminal. Informe o ID numérico estável retornado pelo campo `id` de `GET /repos/owner/repo`, após conferir a identidade. Cadastre apenas um repositório que você controla ou tem autorização explícita para analisar. Copie o SHA completo de um commit (40 caracteres) da página do repositório para iniciar a análise. Depois abra a análise, revise candidatos e baixe o relatório Markdown. Não coloque essa interface atrás de proxy nem a exponha à internet: a conexão local usa HTTP e a senha não substitui HTTPS para acesso remoto.
+
+Para repositórios privados, a API do GitHub requer um token de acesso com permissão de **leitura de conteúdo** naquele repositório. Configure `GITHUB_TOKEN` no ambiente do processo, conforme o gerenciador de segredos do seu computador; não inclua o token nos comandos exemplificados, no chat ou nos arquivos versionados. Para repositórios públicos, o acesso pode funcionar sem token, sujeito ao limite da API. A integração GitHub do ChatGPT não fornece automaticamente credenciais ao processo local.
+
+Veja [aquisição GitHub e limites](docs/etapa-2.md).
+
+## Fluxo por linha de comando
 
 Requer Python 3.12. Não há dependências externas nesta etapa.
 
 ```bash
-python3 -m workbench authorize --repo ofelipepeixoto/rea --confirm-owned
+python3 -m workbench authorize --repo ofelipepeixoto/rea --repository-id 1417322346 --confirm-owned
 python3 -m workbench scan --repo ofelipepeixoto/rea --snapshot /caminho/para/copia/rea --revision COMMIT_COMPLETO
+python3 -m workbench scan-github --repo ofelipepeixoto/rea --revision SHA_COMPLETO_DE_40_CARACTERES
 python3 -m workbench runs
 python3 -m workbench report --run ID_DA_ANALISE
 python3 -m workbench review --run ID_DA_ANALISE --finding IMPRESSAO_DIGITAL --decision false_positive
 python3 -m workbench compare --before ID_ANTERIOR --after ID_NOVO
 ```
 
-`--snapshot` aponta para arquivos obtidos por um meio já autorizado. A ferramenta **não clona** repositórios, não solicita token, não verifica a posse da conta GitHub e não garante que `--revision` corresponde aos arquivos: o relatório inclui um digest calculado da cópia para conferência. O operador atesta a autorização ao cadastrar o repositório. O banco local fica em `.data/workbench.sqlite3` e é ignorado pelo Git.
+`--snapshot` aponta para arquivos obtidos por um meio já autorizado. Nesse modo, `--revision` continua uma declaração sem verificação externa. Em `scan-github`, a ferramenta confere a identidade do repositório, o commit e o hash Git dos arquivos efetivamente lidos. O operador atesta a autorização ao cadastrar o repositório; a ferramenta não verifica posse da conta. O banco local fica em `.data/workbench.sqlite3` e é ignorado pelo Git.
 
 Detecções iniciais: possível credencial atribuída em código e configurações de GitHub Actions com permissões amplas. A lista de dependências é apenas um inventário: ainda não há consulta de CVEs. Todo achado começa como `candidate`; só a revisão humana pode confirmá-lo. Valores de possíveis segredos não são salvos nem exibidos.
 
@@ -27,4 +42,11 @@ Arquivos grandes ou binários, pastas de dependências e links simbólicos são 
 python3 -m unittest discover -s tests -v
 ```
 
-O alvo fictício em `tests/fixtures/repo` contém valores artificiais. Os testes também verificam autorização, ausência de execução do alvo, redação dos valores, revisão e comparação de análises.
+Os testes usam valores artificiais e respostas simuladas da API. Verificam autorização, ausência de execução do alvo, redação dos valores, revisão, comparação, identidade e hashes da aquisição, migração do banco e proteção básica da interface. Ainda não são uma execução real contra a API do GitHub.
+
+
+O escopo GitHub vincula nome e `repository_id` inteiro positivo. Mesmo nome com outro ID é recusado antes de ler commits/blobs. Cadastros locais sem ID continuam válidos para `scan`, mas bloqueiam `scan-github` até repetir `authorize` com ID revisado explicitamente. Um ID já vinculado não pode ser substituído por recadastro. As execuções guardam seu próprio ID; rever o escopo não promove o histórico antigo a verificado.
+
+Há migrações **SQLite locais**, idempotentes, em `workbench/store.py`: colunas `source`, `verified_revision` e `repository_id` em `runs`, e `repository_id` em `scope`. Não existem migrations Supabase nesta etapa. Dados anteriores são preservados, mas execuções sem ID perdem o rótulo de verificação de identidade.
+
+Veja [evidência real e limitação de transporte](docs/validacao-identidade.md). Os testes automatizados continuam simulados; a aquisição estática real por conector não comprova `scan-github` ponta a ponta.

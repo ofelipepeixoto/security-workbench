@@ -17,6 +17,11 @@ MAX_TOTAL_BYTES = 25 * 1024 * 1024
 MAX_FILE_BYTES = 1024 * 1024
 ASSIGNMENT = re.compile(r"(?i)\b(api[_-]?key|access[_-]?token|secret|password|private[_-]?key)\b\s*[:=]\s*['\"]([^'\"\r\n]{8,})['\"]")
 PLACEHOLDER = re.compile(r"(?i)^(?:\$\{|<|your[_-]|changeme|example|placeholder|dummy|test[_-])")
+# Retain ordinary versions, ranges and tags. Source specifications can embed
+# credentials in userinfo, queries or fragments, so omit the whole value.
+SAFE_DEPENDENCY_VERSION = re.compile(
+    r"(?:[A-Za-z0-9][A-Za-z0-9._+-]*|[0-9vVxX*^~<>=][0-9A-Za-z.*+^~<>=| -]*)"
+)
 
 
 def fingerprint(kind: str, path: str, detail: str) -> str:
@@ -72,7 +77,8 @@ def _inspect_text(path: str, text: str) -> tuple[list[dict], list[dict]]:
                 if isinstance(values, dict):
                     for name, version in values.items():
                         if isinstance(name, str) and isinstance(version, str):
-                            dependencies.append({"name": name, "version": version, "source": f"{path}:{group}"})
+                            safe_version = version if SAFE_DEPENDENCY_VERSION.fullmatch(version) else "[REDACTED]"
+                            dependencies.append({"name": name, "version": safe_version, "source": f"{path}:{group}"})
         except (json.JSONDecodeError, AttributeError):
             pass
     return findings, dependencies

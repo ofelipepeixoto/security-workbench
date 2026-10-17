@@ -91,6 +91,7 @@ def inspect_github(repo: str, revision: str, *, repository_id: int, request_json
     dependencies: list[dict] = []
     digest = hashlib.sha256()
     files_read = total_bytes = 0
+    files_acquired = bytes_acquired = 0
     seen: set[str] = set()
     for item in sorted(listing["tree"], key=lambda value: str(value.get("path", ""))):
         path = item.get("path")
@@ -106,7 +107,9 @@ def inspect_github(repo: str, revision: str, *, repository_id: int, request_json
         if not isinstance(size, int) or size < 0 or size > MAX_FILE_BYTES:
             omissions.append(f"{path}: tamanho ausente ou acima de 1 MiB")
             continue
-        if files_read >= MAX_FILES or total_bytes + size > MAX_TOTAL_BYTES:
+        # Bound downloads even when their contents are later skipped as binary.
+        # Zero-byte blobs still consume the request budget.
+        if files_acquired >= MAX_FILES or bytes_acquired + size > MAX_TOTAL_BYTES:
             omissions.append("limite global de 5000 arquivos ou 25 MiB atingido")
             break
         blob_sha = _sha(item.get("sha"))
@@ -119,6 +122,8 @@ def inspect_github(repo: str, revision: str, *, repository_id: int, request_json
             raise ValueError(f"Blob inválido: {path}") from None
         if len(data) != size or len(data) > MAX_FILE_BYTES or hashlib.sha1(f"blob {len(data)}\0".encode() + data).hexdigest() != blob_sha:
             raise ValueError(f"Conteúdo ou hash divergente: {path}")
+        files_acquired += 1
+        bytes_acquired += len(data)
         if b"\0" in data:
             omissions.append(f"{path}: binário")
             continue
@@ -131,7 +136,8 @@ def inspect_github(repo: str, revision: str, *, repository_id: int, request_json
         dependencies.extend(packages)
     return revision, {
         "repository_id": repository_id, "snapshot_digest": digest.hexdigest(), "files_read": files_read,
-        "bytes_read": total_bytes, "partial": bool(omissions),
+        "bytes_read": total_bytes, "files_acquired": files_acquired,
+        "bytes_acquired": bytes_acquired, "partial": bool(omissions),
         "omissions": omissions[:50], "findings": findings, "dependencies": dependencies,
     }
 

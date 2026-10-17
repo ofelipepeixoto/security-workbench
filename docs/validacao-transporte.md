@@ -41,3 +41,7 @@ O `partial=false` do resumo significa que não houve omissão adicional nos form
 - Ordem desta entrega: #1 → #2 → #5 (proteções) → PR de smoke dependente de #5. Os PRs #3/#4 permanecem em suas branches; eventual integração conjunta exigirá atualizar e validar as dependências, sem reescrever histórico automaticamente.
 
 Documentação oficial consultada em 17/10/2026: [GITHUB_TOKEN](https://docs.github.com/en/actions/concepts/security/github_token) e [permissões mínimas](https://docs.github.com/en/actions/tutorials/authenticate-with-github_token).
+
+## Preparação para visibilidade pública
+
+Esta evidência foi produzida quando o Workbench ainda era privado. O smoke continua restrito aos PRs do próprio repositório, ao nome e ID estáveis e ao commit fixo; a verificação da visibilidade agora exige apenas um valor booleano real da API, permitindo futuras execuções após uma eventual abertura do código. O job usa o token temporário de leitura do Actions em ambos os casos. A execução em repositório público ainda dependerá de validação após a mudança de visibilidade.

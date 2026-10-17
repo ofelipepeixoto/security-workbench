@@ -43,6 +43,26 @@ test("metadata rejects private repositories and invalid IDs/branches/identity", 
   }
 });
 
+test("manual redirect mode rejects a Location response without fetching its destination", async () => {
+  const calls = [];
+  const fetcher = async (url, options) => {
+    calls.push({url, redirect: options.redirect});
+    return new Response(null, {status: 302, headers: {Location: "https://evil.example/outside-scope"}});
+  };
+  await assert.rejects(repositoryMetadata(REPO, {fetcher}), /HTTP 302/);
+  assert.deepEqual(calls, [{url: `https://api.github.com/repos/${REPO}`, redirect: "manual"}]);
+});
+
+test("reports exhausted public GitHub quota without following or retrying", async () => {
+  let calls = 0;
+  const fetcher = async () => {
+    calls++;
+    return new Response(null, {status: 403, headers: {"x-ratelimit-limit": "60", "x-ratelimit-remaining": "0"}});
+  };
+  await assert.rejects(repositoryMetadata(REPO, {fetcher}), {name: "GitHubRateLimitError"});
+  assert.equal(calls, 1);
+});
+
 test("pins branch SHA, verifies blobs, and omits credentials/cookies/redirects", async () => {
   const fixture = apiFixture();
   const result = await inspectGitHub(REPO, ID, null, fixture);
@@ -55,7 +75,7 @@ test("pins branch SHA, verifies blobs, and omits credentials/cookies/redirects",
   assert.equal(fixture.calls.filter((call) => call.url.includes("/commits/feat")).length, 1);
   for (const {url, options} of fixture.calls) {
     assert.ok(url.startsWith("https://api.github.com/repos/ofelipepeixoto/rea"));
-    assert.equal(options.method, "GET"); assert.equal(options.redirect, "error"); assert.equal(options.credentials, "omit");
+    assert.equal(options.method, "GET"); assert.equal(options.redirect, "manual"); assert.equal(options.credentials, "omit");
     assert.equal(options.cache, "no-store"); assert.ok(options.signal instanceof AbortSignal);
     assert.equal(options.headers.Authorization, undefined); assert.equal(options.headers.Cookie, undefined);
   }

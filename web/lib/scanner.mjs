@@ -11,6 +11,10 @@ const SAFE_VERSION = /^(?:[A-Za-z0-9][A-Za-z0-9._+-]*|[0-9vVxX*^~<>=][0-9A-Za-z.
 const encoder = new TextEncoder();
 const decoder = new TextDecoder("utf-8", {fatal: false});
 
+export class GitHubRateLimitError extends Error {
+  constructor() { super('A cota pública do GitHub foi atingida. Tente novamente mais tarde.'); this.name = 'GitHubRateLimitError'; }
+}
+
 export function normalizeRepo(input) {
   if (typeof input !== "string" || input.length > 250) throw new Error("Informe o nome ou endereço do seu repositório GitHub.");
   let repo = input.trim();
@@ -56,13 +60,17 @@ async function withTransport(fetcher, work) {
     if (!path.startsWith("/repos/ofelipepeixoto/") || path.includes("#") || path.includes("\\")) throw new Error("Caminho de API inválido.");
     let response;
     try {
-      response = await Promise.race([fetcher(API + path, {method: "GET", redirect: "error", credentials: "omit", cache: "no-store", headers: {Accept: "application/vnd.github+json", "User-Agent": "security-workbench-public-pilot"}, signal: controller.signal}), abort]);
+      // Workers does not implement redirect:error. Manual mode never follows a
+      // Location header; the non-200 guard below rejects every redirect.
+      response = await Promise.race([fetcher(API + path, {method: "GET", redirect: "manual", credentials: "omit", cache: "no-store", headers: {Accept: "application/vnd.github+json", "User-Agent": "security-workbench-public-pilot"}, signal: controller.signal}), abort]);
     } catch (error) {
       if (controller.signal.aborted) throw timeoutError;
       throw new Error("Não foi possível consultar a API pública do GitHub; redirecionamentos são recusados.", {cause: error});
     }
     if (response.status !== 200) {
+      const rateLimited = (response.status === 403 || response.status === 429) && response.headers?.get('x-ratelimit-remaining') === '0';
       await response.body?.cancel().catch(() => {});
+      if (rateLimited) throw new GitHubRateLimitError();
       throw new Error(`GitHub retornou HTTP ${Number(response.status) || 0}; confira acesso público e limite da API.`);
     }
     const contentLength = response.headers?.get("content-length");

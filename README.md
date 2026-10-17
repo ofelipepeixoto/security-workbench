@@ -61,6 +61,8 @@ Veja a [evidência histórica de identidade](docs/validacao-identidade.md), as [
 
 O job `github-live` usa a credencial temporária do GitHub Actions, limitada à leitura do próprio Workbench, para executar o cliente real pela CLI e pela interface HTTP em loopback. Não é preciso criar um token pessoal para esse teste. A autenticação do processo local no seu computador continua separada, conforme as instruções acima. O ambiente de teste é Linux com Python 3.12; Windows ainda não foi homologado.
 
+O [smoke do PR #10](https://github.com/ofelipepeixoto/security-workbench/actions/runs/39071494798) passou depois da abertura pública do repositório. Isso valida a aquisição no Actions, não a revisão e comparação reais na hospedagem. Consulte os [contratos e a ordem das próximas integrações](docs/proximas-integracoes.md) para REA, sites autorizados, repositórios privados, CVEs, Supabase, n8n, VPS e agentes/MCP.
+
 ## Comunidade e licença
 
 O código autoral está sob [licença MIT](LICENSE); avisos de terceiros são preservados no diretório `web/`. Veja [a origem do adaptador e do starter](web/PROVENANCE.md), o [guia de contribuição](CONTRIBUTING.md) e a [política de segurança](SECURITY.md). Esta versão é experimental: reporte falhas do próprio Workbench por canal privado e não divulgue dados de alvos em issues.

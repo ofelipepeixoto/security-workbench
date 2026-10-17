@@ -1,6 +1,6 @@
 # Adaptador para a área privada no navegador
 
-O usuário escolheu acesso por link privado em 17/10/2026. O núcleo Python do PR #6 continua preservado. O runtime de Sites usa JavaScript/Workers, por isso esta camada adapta as regras existentes em um módulo independente, com fixture de conformidade Python.
+A primeira versão foi planejada com acesso por link privado em 17/10/2026; depois o proprietário autorizou demonstração pública com operação protegida. O núcleo Python integrado originalmente pelo PR #6 continua preservado. O runtime de Sites usa JavaScript/Workers, por isso esta camada adapta as regras existentes em um módulo independente, com fixture de conformidade Python.
 
 ## Contrato
 
@@ -13,10 +13,10 @@ O usuário escolheu acesso por link privado em 17/10/2026. O núcleo Python do P
 
 `node --test web/tests/scanner.test.mjs`: **12 testes aprovados localmente**. Uma fixture gerada com o Python da versão do PR #6 confirma igualdade de textos, fingerprints, dependências e digest de um conjunto simples. Essa fixture não comprova paridade integral entre linguagens ou formatos.
 
-`web/tests/live-smoke.mjs` é separado dos mocks e só executa no Actions deste repositório. Alvo autorizado fixo: `ofelipepeixoto/rea`, ID `1417322346`, commit `3e7c6302233ecbcb9b92e43ee5a60337738961bd`. Emite apenas identidade, hashes e contagens. O resultado remoto será registrado no PR após a execução; não há credencial pessoal ou conteúdo alvo no log.
+`web/tests/live-smoke.mjs` é separado dos mocks e só executa no Actions deste repositório. Alvo autorizado fixo: `ofelipepeixoto/rea`, ID `1417322346`, commit `3e7c6302233ecbcb9b92e43ee5a60337738961bd`. Emite apenas identidade, hashes e contagens. O [resultado remoto](https://github.com/ofelipepeixoto/security-workbench/actions/runs/39063959367) foi registrado com cobertura parcial: 20 arquivos / 72.882 bytes e zero candidatos nesse recorte; não há credencial pessoal ou conteúdo alvo no log.
 
 ## Dependência e operação
 
-Esta camada depende do PR #6 e mantém o módulo Python/SQLite. A interface, autenticação Sites e armazenamento isolado são uma camada dependente, sem migração dos dois projetos Supabase de outros sistemas. O conector GitHub do ChatGPT não é automaticamente disponibilizado ao site; a primeira versão web não acessa repositórios privados.
+Esta camada foi integrada depois do PR #6 e mantém o módulo Python/SQLite. A interface, autenticação Sites e armazenamento isolado são uma camada dependente, sem migração dos dois projetos Supabase de outros sistemas. O conector GitHub do ChatGPT não é automaticamente disponibilizado ao site; a primeira versão web não acessa repositórios privados.
 
-Sem merge ou implantação automática. O site está sendo preparado como versão salva para revisão, conforme a restrição anterior do usuário.
+O código dos PRs #6, #7 e #8 está integrado na `main`. O Site publicado e a sua autenticação continuam operações separadas do repositório GitHub.

@@ -31,4 +31,4 @@ Veja `PROVENANCE.md`. A base é o starter oficial Sites 1.0.1. O build segue `no
 
 `tests/live-smoke.mjs` é separado dos mocks e restrito ao Actions do Workbench. Fixa REA ID `1417322346` e commit `3e7c6302233ecbcb9b92e43ee5a60337738961bd`, sem conteúdo alvo nos logs.
 
-Versão 9 publicada no Site com domínio e HTTPS ativos. O proprietário executou uma análise parcial real do REA na hospedagem; revisão de candidato real e comparação de duas análises hospedadas continuam sem homologação. [Estado verificado e limites](../docs/sistema-web-privado.md). Credenciais, bancos, fonte alvo e estado de QA ficam fora do pacote.
+Versão 10 publicada no Site com domínio e HTTPS ativos, atualizando `next` para 16.3.8. O proprietário executou uma análise parcial real do REA na versão anterior; revisão de candidato real e comparação de duas análises hospedadas continuam sem homologação na versão atual. [Estado verificado e limites](../docs/sistema-web-privado.md). Credenciais, bancos, fonte alvo e estado de QA ficam fora do pacote.

@@ -1,0 +1,227 @@
+/** Bounded, public GitHub acquisition. Rules/texts ported from Workbench PR #6. */
+const OWNER = "ofelipepeixoto";
+const API = "https://api.github.com";
+export const SCANNER_LIMITS = Object.freeze({files: 20, bytes: 2 * 1024 * 1024, fileBytes: 256 * 1024, responseBytes: 4 * 1024 * 1024, deadlineMs: 45000, findings: 100, dependencies: 500});
+const SHA = /^[0-9a-fA-F]{40}$/;
+const SKIP_DIRS = new Set([".git", ".data", ".venv", "venv", "node_modules", "dist", "build", "__pycache__"]);
+const TEXT_EXTENSIONS = new Set([".py", ".js", ".jsx", ".ts", ".tsx", ".json", ".yml", ".yaml", ".txt", ".toml", ".ini", ".cfg"]);
+const ASSIGNMENT = /\b(api[_-]?key|access[_-]?token|secret|password|private[_-]?key)\b\s*[:=]\s*['"]([^'"\r\n]{8,})['"]/i;
+const PLACEHOLDER = /^(?:\$\{|<|your[_-]|changeme|example|placeholder|dummy|test[_-])/i;
+const SAFE_VERSION = /^(?:[A-Za-z0-9][A-Za-z0-9._+-]*|[0-9vVxX*^~<>=][0-9A-Za-z.*+^~<>=| -]*)$/;
+const encoder = new TextEncoder();
+const decoder = new TextDecoder("utf-8", {fatal: false});
+
+export function normalizeRepo(input) {
+  if (typeof input !== "string" || input.length > 250) throw new Error("Informe o nome ou endereço do seu repositório GitHub.");
+  let repo = input.trim();
+  if (/[\x00-\x1f\x7f\\]/.test(repo) || repo.split("/").includes("..")) throw new Error("Endereço ou nome de repositório inválido.");
+  if (/^https:\/\//i.test(repo)) {
+    let url;
+    try {url = new URL(repo);} catch {throw new Error("Endereço GitHub inválido.");}
+    if (url.protocol !== "https:" || url.hostname !== "github.com" || url.port || url.username || url.password || url.search || url.hash || /[?%#\\]/.test(repo)) throw new Error("Use um endereço HTTPS do GitHub, sem parâmetros ou credenciais.");
+    repo = url.pathname.replace(/^\//, "").replace(/\/$/, "");
+  }
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo) || repo.includes("..") || repo.startsWith(".") || repo.split("/")[1].startsWith(".")) throw new Error("Informe owner/repositório ou seu endereço HTTPS no GitHub.");
+  repo = repo.toLowerCase();
+  if (repo.split("/")[0] !== OWNER) throw new Error("Este piloto aceita apenas repositórios de ofelipepeixoto.");
+  return repo;
+}
+
+function repositoryId(value) {
+  if (!Number.isSafeInteger(value) || value <= 0) throw new Error("ID de repositório inválido.");
+  return value;
+}
+function sha(value) {
+  if (typeof value !== "string" || !SHA.test(value)) throw new Error("SHA Git inválido na resposta.");
+  return value.toLowerCase();
+}
+function branch(value) {
+  if (typeof value !== "string" || value.length > 200 || !/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(value) || value.includes("..") || value.includes("//") || value.endsWith("/") || value.endsWith(".") || value.endsWith(".lock")) throw new Error("Branch padrão inválida na resposta do GitHub.");
+  return value;
+}
+function validateMetadata(value, repo) {
+  if (value.private !== false) throw new Error("Este piloto web aceita apenas repositórios públicos; os privados continuam no aplicativo local.");
+  if (typeof value.full_name !== "string" || value.full_name.toLowerCase() !== repo || normalizeRepo(value.full_name) !== repo) throw new Error("Identidade do repositório divergente.");
+  return {repo, repository_id: repositoryId(value.id), default_branch: branch(value.default_branch), private: false};
+}
+
+async function withTransport(fetcher, work) {
+  const controller = new AbortController();
+  const timeoutError = new Error("A leitura ultrapassou 45 segundos. Nenhuma análise foi salva.");
+  const timer = setTimeout(() => controller.abort(timeoutError), SCANNER_LIMITS.deadlineMs);
+  const abort = new Promise((_, reject) => controller.signal.addEventListener("abort", () => reject(timeoutError), {once: true}));
+  async function get(path) {
+    if (controller.signal.aborted) throw timeoutError;
+    // Paths are authored here, never accepted as arbitrary URLs from an API response.
+    if (!path.startsWith("/repos/ofelipepeixoto/") || path.includes("#") || path.includes("\\")) throw new Error("Caminho de API inválido.");
+    let response;
+    try {
+      response = await Promise.race([fetcher(API + path, {method: "GET", redirect: "error", credentials: "omit", cache: "no-store", headers: {Accept: "application/vnd.github+json", "User-Agent": "security-workbench-public-pilot"}, signal: controller.signal}), abort]);
+    } catch (error) {
+      if (controller.signal.aborted) throw timeoutError;
+      throw new Error("Não foi possível consultar a API pública do GitHub; redirecionamentos são recusados.", {cause: error});
+    }
+    if (response.status !== 200) {
+      await response.body?.cancel().catch(() => {});
+      throw new Error(`GitHub retornou HTTP ${Number(response.status) || 0}; confira acesso público e limite da API.`);
+    }
+    const contentLength = response.headers?.get("content-length");
+    if (contentLength && (!/^\d+$/.test(contentLength) || Number(contentLength) > SCANNER_LIMITS.responseBytes)) {
+      await response.body?.cancel().catch(() => {});
+      throw new Error("Resposta do GitHub excede o limite de 4 MiB.");
+    }
+    if (!response.body?.getReader) throw new Error("Resposta da API sem fluxo de leitura válido.");
+    const reader = response.body.getReader();
+    const chunks = [];
+    let length = 0;
+    try {
+      while (true) {
+        const {done, value} = await Promise.race([reader.read(), abort]);
+        if (done) break;
+        length += value.byteLength;
+        if (length > SCANNER_LIMITS.responseBytes) throw new Error("Resposta do GitHub excede o limite de 4 MiB.");
+        chunks.push(value);
+      }
+    } catch (error) {
+      await reader.cancel().catch(() => {});
+      if (controller.signal.aborted) throw timeoutError;
+      throw error;
+    } finally {reader.releaseLock();}
+    let value;
+    try {value = JSON.parse(decoder.decode(concat(chunks)));} catch {throw new Error("Resposta JSON inválida do GitHub.");}
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Resposta inválida da API.");
+    return value;
+  }
+  try {return await work(get);} finally {clearTimeout(timer);}
+}
+
+export async function repositoryMetadata(repo, {fetcher = fetch} = {}) {
+  repo = normalizeRepo(repo);
+  return withTransport(fetcher, async (get) => validateMetadata(await get(`/repos/${repo}`), repo));
+}
+function concat(chunks) {
+  const result = new Uint8Array(chunks.reduce((size, chunk) => size + chunk.byteLength, 0));
+  let offset = 0;
+  for (const chunk of chunks) {result.set(chunk, offset); offset += chunk.byteLength;}
+  return result;
+}
+async function hash(algorithm, data) {return new Uint8Array(await crypto.subtle.digest(algorithm, data));}
+function hex(bytes) {return [...bytes].map((x) => x.toString(16).padStart(2, "0")).join("");}
+function utf8Order(a, b) {
+  const left = encoder.encode(a), right = encoder.encode(b);
+  for (let i = 0; i < Math.min(left.length, right.length); i++) {if (left[i] !== right[i]) return left[i] - right[i];}
+  return left.length - right.length;
+}
+function eligible(path) {
+  if (typeof path !== "string" || !path || path.length > 1024 || /[\\\x00-\x1f\x7f-\x9f\uD800-\uDFFF]/u.test(path)) return false;
+  const parts = path.split("/");
+  if (parts.some((p) => !p || p === "." || p === "..") || parts.slice(0, -1).some((p) => SKIP_DIRS.has(p))) return false;
+  const name = parts.at(-1);
+  if (name.startsWith(".env")) return false;
+  const dot = name.lastIndexOf(".");
+  const extension = dot > 0 ? name.slice(dot).toLowerCase() : "";
+  return TEXT_EXTENSIONS.has(extension) || name === "requirements.txt" || name === "Dockerfile";
+}
+async function finding(kind, path, line, detail, evidence, impact, recommendation, confidence) {
+  return {fingerprint: hex(await hash("SHA-256", encoder.encode(`${kind}\0${path}\0${detail}`))).slice(0, 20), kind, path, line, status: "candidate", confidence, evidence, impact, recommendation};
+}
+async function inspectText(path, text, remainingFindings, remainingDependencies) {
+  const findings = [], dependencies = [];
+  let findingsTotal = 0, dependenciesTotal = 0;
+  function addDependency(item) {dependenciesTotal++; if (dependencies.length < remainingDependencies) dependencies.push(item);}
+  const lines = text.split(/\r\n|[\n\r\v\f\x1c-\x1e\x85\u2028\u2029]/);
+  for (let i = 0; i < lines.length; i++) {
+    const match = lines[i].match(ASSIGNMENT), number = i + 1;
+    if (match && !PLACEHOLDER.test(match[2].trim())) {
+      const key = match[1].toLowerCase();
+      findingsTotal++;
+      if (findings.length < remainingFindings) findings.push(await finding("possible-secret", path, number, key, `Atribuição a ${key} com valor [REDACTED] em ${path}:${number}.`, "Uma credencial real exposta pode permitir acesso indevido; a validade não foi verificada.", "Revisar o valor fora do relatório; se for real, revogá-lo e removê-lo do histórico com procedimento controlado.", `/${path}`.includes("/test") || path.includes("fixture") ? "low" : "medium"));
+    }
+    if (path.startsWith(".github/workflows/") && /^\s*permissions\s*:\s*write-all\s*(?:#.*)?$/.test(lines[i])) {findingsTotal++; if (findings.length < remainingFindings) findings.push(await finding("broad-workflow-permissions", path, number, "write-all", `Declaração permissions: write-all em ${path}:${number}.`, "Um workflow comprometido pode obter permissões amplas, conforme seu gatilho e contexto.", "Revisar o gatilho e conceder apenas permissões específicas necessárias.", "high"));}
+  }
+  if (path === "requirements.txt") {
+    for (const line of lines) {const match = line.match(/^\s*([A-Za-z0-9_.-]+)==([A-Za-z0-9_.!+~-]+)\s*$/); if (match) addDependency({name: match[1], version: match[2], source: path});}
+  }
+  if (path === "package.json") {
+    try {
+      const packageValue = JSON.parse(text);
+      for (const group of ["dependencies", "devDependencies"]) {
+        const values = packageValue?.[group];
+        if (values && typeof values === "object" && !Array.isArray(values)) for (const [name, version] of Object.entries(values)) if (typeof version === "string") addDependency({name, version: SAFE_VERSION.test(version) ? version : "[REDACTED]", source: `${path}:${group}`});
+      }
+    } catch { /* Unsupported manifest contents are not dependency evidence. */ }
+  }
+  return {findings, dependencies, findingsTotal, dependenciesTotal};
+}
+function decodeBase64(content) {
+  if (typeof content !== "string" || content.length > Math.ceil(SCANNER_LIMITS.fileBytes / 3) * 4 + 20000) throw new Error("Conteúdo de blob inválido.");
+  const value = content.replace(/[\r\n\t ]/g, "");
+  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) throw new Error("Conteúdo de blob inválido.");
+  const binary = atob(value);
+  return Uint8Array.from(binary, (c) => c.charCodeAt(0));
+}
+
+export async function inspectGitHub(repo, boundRepositoryId, revision = null, {fetcher = fetch} = {}) {
+  repo = normalizeRepo(repo);
+  boundRepositoryId = repositoryId(boundRepositoryId);
+  if (revision !== null) revision = sha(revision);
+  return withTransport(fetcher, async (get) => {
+    const prefix = `/repos/${repo}`;
+    const metadata = validateMetadata(await get(prefix), repo);
+    if (metadata.repository_id !== boundRepositoryId) throw new Error("Identidade do repositório divergente do escopo autorizado.");
+    if (revision === null) revision = sha((await get(`${prefix}/commits/${encodeURIComponent(metadata.default_branch)}`)).sha);
+    const commit = await get(`${prefix}/git/commits/${revision}`);
+    if (sha(commit.sha) !== revision) throw new Error("Commit divergente do solicitado.");
+    const treeSha = sha(commit.tree?.sha);
+    const listing = await get(`${prefix}/git/trees/${treeSha}?recursive=1`);
+    if (sha(listing.sha) !== treeSha || !Array.isArray(listing.tree)) throw new Error("Árvore divergente ou inválida.");
+    if (listing.truncated !== true && listing.truncated !== false) throw new Error("Cobertura da árvore desconhecida.");
+    if (listing.tree.some((item) => !item || typeof item !== "object" || Array.isArray(item) || typeof item.path !== "string")) throw new Error("Entrada inválida na árvore GitHub.");
+    const omissions = [], findings = [], dependencies = [], digestParts = [], seen = new Set();
+    let filesRead = 0, bytesRead = 0, filesAcquired = 0, bytesAcquired = 0, binarySkipped = 0, overSizeSkipped = 0;
+    let findingsTotal = 0, dependenciesTotal = 0;
+    if (listing.truncated) omissions.push("Árvore GitHub truncada; cobertura parcial.");
+    for (const item of [...listing.tree].sort((a, b) => utf8Order(a.path, b.path))) {
+      const path = item.path;
+      if (!eligible(path)) continue;
+      if (seen.has(path)) throw new Error("Caminho duplicado na árvore.");
+      seen.add(path);
+      if (item.type !== "blob" || !["100644", "100755"].includes(item.mode)) {omissions.push(`${path}: tipo não regular`); continue;}
+      const size = item.size;
+      if (!Number.isSafeInteger(size) || size < 0 || size > SCANNER_LIMITS.fileBytes) {omissions.push(`${path}: tamanho ausente ou acima de 256 KiB`); overSizeSkipped++; continue;}
+      if (filesAcquired >= SCANNER_LIMITS.files || bytesAcquired + size > SCANNER_LIMITS.bytes) {omissions.push("Limite web de 20 arquivos ou 2 MiB atingido; cobertura parcial."); break;}
+      const blobSha = sha(item.sha), blob = await get(`${prefix}/git/blobs/${blobSha}`);
+      if (sha(blob.sha) !== blobSha || blob.encoding !== "base64" || blob.size !== size) throw new Error(`Blob divergente: ${path}`);
+      const data = decodeBase64(blob.content);
+      if (data.byteLength !== size || data.byteLength > SCANNER_LIMITS.fileBytes || hex(await hash("SHA-1", concat([encoder.encode(`blob ${data.byteLength}\0`), data]))) !== blobSha) throw new Error(`Conteúdo ou hash divergente: ${path}`);
+      filesAcquired++; bytesAcquired += data.byteLength;
+      if (data.includes(0)) {omissions.push(`${path}: binário`); binarySkipped++; continue;}
+      filesRead++; bytesRead += data.byteLength;
+      digestParts.push(encoder.encode(`${path}\0`), await hash("SHA-256", data));
+      const inspected = await inspectText(path, decoder.decode(data), Math.max(0, SCANNER_LIMITS.findings - findings.length), Math.max(0, SCANNER_LIMITS.dependencies - dependencies.length));
+      findingsTotal += inspected.findingsTotal;
+      dependenciesTotal += inspected.dependenciesTotal;
+      findings.push(...inspected.findings);
+      dependencies.push(...inspected.dependencies);
+    }
+    if ((filesAcquired >= SCANNER_LIMITS.files || bytesAcquired >= SCANNER_LIMITS.bytes) && !omissions.some((x) => x.startsWith("Limite web"))) omissions.push("Limite web de 20 arquivos ou 2 MiB atingido; cobertura parcial.");
+    if (findingsTotal > findings.length) omissions.push("Limite de 100 candidatos no piloto web; cobertura parcial de achados.");
+    if (dependenciesTotal > dependencies.length) omissions.push("Limite de 500 dependências no piloto web; inventário parcial.");
+    return {revision, repository_id: boundRepositoryId, snapshot_digest: hex(await hash("SHA-256", concat(digestParts))), files_read: filesRead, bytes_read: bytesRead, files_acquired: filesAcquired, bytes_acquired: bytesAcquired, binary_skipped: binarySkipped, oversized_skipped: overSizeSkipped, findings_total: findingsTotal, dependencies_total: dependenciesTotal, partial: omissions.length > 0, omissions: omissions.slice(0, 50), findings, dependencies, source: "github-public", verified_revision: true, limits: SCANNER_LIMITS};
+  });
+}
+
+// Escape Markdown syntax and HTML in all untrusted fields, including backticks,
+// link brackets, line breaks and autolink punctuation. Reports contain no raw HTML.
+function markdown(value) {return String(value ?? "").replace(/\r\n|[\r\n\x00-\x1f\x7f]/g, " ").replace(/[\\`*_{}\[\]()#+.!|><:&~=-]/g, (c) => `&#${c.charCodeAt(0)};`);}
+export function renderReport(run) {
+  const verified = run.verified_revision === true && Number.isSafeInteger(run.repository_id) && run.repository_id > 0;
+  const lines = [`# Security Workbench — ${markdown(run.repo)}`, "", `Análise: ${markdown(run.id)} · revisão ${verified ? "verificada" : "declarada"}: ${markdown(run.revision)}`, `Repository ID: ${markdown(run.repository_id)}`, `Origem: ${markdown(run.source || "github-public")} · digest dos arquivos lidos: ${markdown(run.snapshot_digest || run.digest)}`, `Cobertura: **${run.partial ? "PARCIAL" : "Limitada aos arquivos suportados"}** · ${markdown(run.files_read)} arquivos / ${markdown(run.bytes_read)} bytes`, "", (verified ? "Identidade, commit e hashes dos arquivos lidos foram conferidos via API do GitHub. " : "A revisão declarada não foi confrontada com o GitHub. ") + "Ausência de achados não comprova segurança.", "", "Piloto web: apenas repositórios públicos de ofelipepeixoto; até 20 arquivos, 2 MiB no total e 256 KiB por arquivo. Não executa código do alvo.", "", "## Achados", ""];
+  if (!run.findings?.length) lines.push("Nenhum candidato nos arquivos lidos.");
+  for (const item of run.findings || []) lines.push(`### ${markdown(item.kind)} · ${markdown(item.fingerprint)}`, "", `Local: ${markdown(item.path)}:${markdown(item.line)} · estado: ${markdown(item.status)} · confiança: ${markdown(item.confidence)}`, "", `Evidência: ${markdown(item.evidence)}`, "", `Impacto possível: ${markdown(item.impact)}`, "", `Recomendação: ${markdown(item.recommendation)}`, "");
+  lines.push("## Inventário de dependências (sem análise de CVEs)", "");
+  if (!run.dependencies?.length) lines.push("Nenhuma dependência reconhecida nos manifestos suportados.");
+  for (const item of run.dependencies || []) lines.push(`- ${markdown(item.name)} ${markdown(item.version)} (${markdown(item.source)})`);
+  if (run.omissions?.length) {lines.push("", "## Limitações de leitura", ""); for (const item of run.omissions) lines.push(`- ${markdown(item)}`);}
+  return lines.join("\n") + "\n";
+}

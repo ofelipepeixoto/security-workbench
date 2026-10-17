@@ -1,4 +1,4 @@
-"""Smoke real de PR interno para o próprio repositório privado, sem registrar conteúdo."""
+"""Smoke real de PR interno para o próprio repositório, sem registrar conteúdo."""
 
 from __future__ import annotations
 
@@ -47,7 +47,7 @@ def run() -> dict:
     require(os.environ.get("GITHUB_REPOSITORY_ID") == str(TARGET_ID), "ID do workflow divergente.")
     require(bool(os.environ.get("GITHUB_TOKEN")), "Credencial temporária do job não disponível.")
     metadata = _request_json(f"/repos/{TARGET_REPO}")
-    require(metadata.get("private") is True, "O alvo do smoke deve continuar privado.")
+    require(type(metadata.get("private")) is bool, "Visibilidade do alvo não confirmada.")
     require(metadata.get("id") == TARGET_ID and metadata.get("full_name") == TARGET_REPO, "Identidade de preflight divergente.")
     with tempfile.TemporaryDirectory(prefix="workbench-smoke-") as temporary:
         state = Path(temporary) / "workbench.sqlite3"
@@ -117,7 +117,7 @@ def run() -> dict:
         # Só metadados e contagens. Sem fonte, tokens, banco ou relatório completo.
         return {
             "status": "passed", "transport": "direct_https_api", "repository": TARGET_REPO,
-            "repository_id": TARGET_ID, "target_commit": TARGET_COMMIT, "private": True,
+            "repository_id": TARGET_ID, "target_commit": TARGET_COMMIT, "private": metadata["private"],
             "executions": 2, "flows": ["cli", "loopback_http"],
             "files_analyzed_per_run": first["files_read"], "bytes_analyzed_per_run": first["bytes_read"],
             "snapshot_digest": first["digest"], "candidates_per_run": len(first["findings"]),

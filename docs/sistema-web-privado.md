@@ -4,7 +4,7 @@
 
 A versão inicial foi privada. Após autorização para tornar o Site público, visitantes anônimos podem navegar na demonstração fictícia sem login. A operação real continua vinculada à identidade ChatGPT do proprietário: link do repositório → conferir identidade/confirmar escopo → analisar versão atual → revisar candidatos → relatório/histórico/comparação. SHA específico fica em opção avançada.
 
-O site foi criado com acesso `custom`, somente o proprietário. A versão 8 foi publicada em ambiente privado. Em 17/10/2026, a versão 9 foi publicada e a audiência passou para `public` por pedido explícito do proprietário. Não houve merge dos PRs.
+O site foi criado com acesso `custom`, somente o proprietário. A versão 8 foi publicada em ambiente privado. Em 17/10/2026, a versão 9 foi publicada e a audiência passou para `public` por pedido explícito do proprietário. Os PRs #1, #2, #5, #6, #7 e #8 foram integrados depois à `main`; a publicação do Site é independente.
 
 - Projeto Sites: `appgprj_6ad3cd3180a481918c0f7b58dfd6f3e7`.
 - Versão publicada: 9, ID `appgprj_6ad3cd3180a481918c0f7b58dfd6f3e7~appgver_35a031a8198c81919cad7070f77996b4`.
@@ -44,6 +44,6 @@ Após a renovação da cota, o proprietário cadastrou `ofelipepeixoto/rea` pelo
 
 O erro de redirecionamento incompatível com Workers foi corrigido: `redirect: manual`, rejeição de toda resposta diferente de 200 e teste próprio. Quando a cota pública acaba, a interface exibe o limite sem registrar análise vazia. Para operação regular, avaliar um acesso GitHub de leitura configurado como segredo no Sites fora do chat ou uma integração elegível; a cota por IP sem token é compartilhada e pode esgotar antes da análise. Não transmitir credenciais pelo chat nem contornar controles de rede. Uma falha de rede do cliente HTTP do workspace ao endpoint interno de preview não foi contornada; a UI foi verificada pelo navegador e os contratos da API por testes locais.
 
-CI do [PR #8, run 39066019922](https://github.com/ofelipepeixoto/security-workbench/actions/runs/39066019922): três jobs concluídos com sucesso, incluindo 17 testes Python, 23 testes Node, smoke privado CLI/HTTP e smoke público parcial do REA.
+CI histórica do [PR #8, run 39066019922](https://github.com/ofelipepeixoto/security-workbench/actions/runs/39066019922): três jobs concluídos com sucesso, incluindo 17 testes Python, 23 testes Node, smoke privado CLI/HTTP e smoke público parcial do REA.
 
 Ordem desta linha: #1 → #2 → #5 → #6 → #7 (adaptador) → #8 (interface/persistência). PRs #3/#4 permanecem preservados em suas branches de estudos. Reversão: publicar uma versão anterior do site sem apagar bancos ou reescrever branches automaticamente.

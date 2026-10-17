@@ -26,3 +26,7 @@ O relatório Markdown foi gerado e conferido: identidade observada acima é evid
 O `gh` local retornou `Forbidden` para o Workbench. O cliente HTTP real da aplicação (`_request_json`) retornou `URLError` ao consultar o repositório público REA. Não houve alteração de acesso, permissões ou credenciais. O conector autorizado permitiu a aquisição estática real descrita acima, mas **`scan-github` direto ponta a ponta continua não validado**. Não houve replay de respostas do conector apresentado como transporte ao vivo. Validação de hashes dos dois blobs não equivale à cobertura integral do repositório nem à verificação criptográfica da assinatura do commit.
 
 Esta evidência complementa `docs/verificacao.md` (amostra histórica da etapa 1, com apenas 120 linhas de `src/cli.ts`); os números são diferentes porque agora os dois blobs são completos. Sem scanners de serviços, dados de clientes, novas credenciais, APIs pagas, merge ou deploy.
+
+## Atualização posterior
+
+A limitação de transporte direto acima descreve a execução de 16/10/2026. A [homologação posterior no runner do GitHub Actions](validacao-transporte.md) executou a CLI e a interface HTTP reais contra um commit do Workbench, com duas aquisições independentes. Ela não amplia a cobertura parcial do REA citada nesta página.

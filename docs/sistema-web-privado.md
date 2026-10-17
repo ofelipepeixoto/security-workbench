@@ -1,22 +1,22 @@
-# Sistema web privado — publicação e homologação em 17/10/2026
+# Site público e área de trabalho protegida — 17/10/2026
 
 ## Resultado e operação
 
-O usuário escolheu acesso por link privado. A área web reutiliza as regras e contratos do núcleo existente e simplifica a jornada: login ChatGPT → link do repositório → conferir identidade/confirmar escopo → analisar versão atual → revisar candidatos → relatório/histórico/comparação. SHA específico fica em opção avançada.
+A versão inicial foi privada. Após autorização para tornar o Site público, visitantes anônimos podem navegar na demonstração fictícia sem login. A operação real continua vinculada à identidade ChatGPT do proprietário: link do repositório → conferir identidade/confirmar escopo → analisar versão atual → revisar candidatos → relatório/histórico/comparação. SHA específico fica em opção avançada.
 
-O site foi criado com acesso `custom`, somente o proprietário. A versão 1 foi salva sem deploy; após autorização explícita do proprietário, a versão 8 foi publicada em ambiente privado. Não houve merge dos PRs ou alteração de audiência.
+O site foi criado com acesso `custom`, somente o proprietário. A versão 8 foi publicada em ambiente privado. Em 17/10/2026, a versão 9 foi publicada e a audiência passou para `public` por pedido explícito do proprietário. Não houve merge dos PRs.
 
 - Projeto Sites: `appgprj_6ad3cd3180a481918c0f7b58dfd6f3e7`.
-- Versão publicada: 8, ID `appgprj_6ad3cd3180a481918c0f7b58dfd6f3e7~appgver_9224cff46fac81918e1652d170d3673c`.
-- Fonte Sites exata: `dcb15b62b9c605dac28c0b1ee2b241a79baba86e`.
-- Endereço ativo, restrito ao proprietário: `https://security-workbench.radarjacarepagua.chatgpt.site`.
+- Versão publicada: 9, ID `appgprj_6ad3cd3180a481918c0f7b58dfd6f3e7~appgver_35a031a8198c81919cad7070f77996b4`.
+- Fonte Sites exata: `d4b6d8ea25fe4f4e535dab177a44e111d7f19f0e`.
+- Endereço personalizado ativo, com SSL ativo: `https://security-workbench.camaleaoweb3.com.br`. O endereço `https://security-workbench.radarjacarepagua.chatgpt.site` também permanece publicado.
 - Versão 1 original permanece salva no histórico; as versões intermediárias registram diagnóstico e correção do runtime hospedado. A versão 8 remove um cache de compilação gerado da fonte e passa a ignorá-lo; a rota e as regras de análise são as mesmas da versão 7 homologada. O histórico persistiu após essa publicação.
 
-## Arquitetura e dados
+## Verificação da publicação pública\n\nEm 17/10/2026, o Sites confirmou domínio `active`, provider `active` e SSL `active`; `get_site` confirmou versão 9 e audiência `public`. Uma requisição HTTPS anônima à página retornou HTTP 200 e exibiu “Demonstração”, “Dados fictícios” e “Exemplo público”. A mesma sessão anônima recebeu HTTP 401 em `GET /api/workbench`, sem projetos, achados ou relatórios. Os 23 testes Node locais e o build do Sites passaram antes da publicação. A demonstração não equivale a análise real pública. Para operar sem identidade ChatGPT, seria necessária outra autenticação com isolamento e política de autorização, ainda não implementada.\n\n## Arquitetura e dados
 
 O Python/SQLite original permanece preservado. O runtime web é um adaptador JavaScript/Workers, com fixture de conformidade. `web/PROVENANCE.md` identifica código da aplicação, configuração do starter oficial Sites e arquivos gerados. Não representa portabilidade integral do Python.
 
-Sites fornece autenticação ChatGPT e política privada. Cada operação API valida identidade no servidor; todas as consultas de dados incluem o ID do usuário. POST exige origem exata e corpo JSON até 8 KiB. Sem token no navegador, proxy arbitrário ou credencial do conector copiada.
+Sites fornece identidade ChatGPT para a operação protegida. A audiência pública libera a página e a demonstração fictícia, mas cada operação da API continua exigindo identidade no servidor; todas as consultas de dados incluem o ID do usuário. POST exige origem exata e corpo JSON até 8 KiB. Sem token no navegador, proxy arbitrário ou credencial do conector copiada.
 
 D1 guarda projetos, análises e revisões isolados neste site. Migração aditiva schema-only gerada via Drizzle e aplicada apenas ao ambiente local de QA. O atendimento de requisições não cria tabelas. Análises têm identificador idempotente e bloqueio SQL por projeto; falhas/interrupções são estados explícitos, sem reexecução automática ou resultado vazio inventado.
 

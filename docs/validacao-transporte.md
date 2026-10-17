@@ -14,7 +14,23 @@ O código da plataforma é executado como ferramenta sob teste. Os bytes adquiri
 
 ## Evidência
 
-Os **17 testes locais** passaram em 17/10/2026. O smoke real está preparado; seu resultado será registrado no PR após a execução no GitHub Actions. Essa preparação, sozinha, não comprova acesso real à API.
+Os **17 testes locais** passaram em 17/10/2026. No [GitHub Actions run 39061685058](https://github.com/ofelipepeixoto/security-workbench/actions/runs/39061685058), os jobs `test` e `github-live` concluíram com **success** para o código de teste `c60127355963d0090892d7ff74642fb4d8970148`. O passo real terminou às 19:16:01 UTC (16:16:01 em São Paulo), em 17/10/2026.
+
+| Evidência do job real | Resultado |
+| --- | --- |
+| Transporte | HTTPS direto do cliente da aplicação à API GitHub |
+| Identidade | `ofelipepeixoto/security-workbench`, ID `1419403320`, privado confirmado |
+| Commit alvo | `c8489f1a9fa73aafa8ecbb010281488815128801` |
+| Fluxos | CLI em subprocesso + servidor HTTP loopback, ambos com scanner real |
+| Aquisições | 2 independentes |
+| Conteúdo analisado por execução | 10 arquivos, 57.815 bytes |
+| Digest dos arquivos lidos | `2ff872b507b0ea872ae3b584c1f5ce1bd1dbef9eec6c1e57edf316ce10671e15` |
+| Candidatos por execução | 3, sem confirmação humana de vulnerabilidade |
+| Dependências | 0 manifestos reconhecidos neste commit do Workbench |
+| Comparação do mesmo commit | Aprovada: mesmo digest e nenhum candidato novo/deixou de ser detectado |
+| Cobertura | Formatos suportados; nenhum limite/omissão parcial acionado nessa execução |
+
+O `partial=false` do resumo significa que não houve omissão adicional nos formatos suportados; não indica auditoria integral ou segurança do repositório. O run usa credencial temporária do próprio Actions, não token pessoal ou credencial do conector. A limitação de transporte registrada em 16/10 foi resolvida **neste runner**; isso não modifica a restrição de rede do workspace ou configura autenticação no computador do usuário.
 
 ## Limites
 

@@ -19,7 +19,7 @@ O modo **Demonstração** usa dados fictícios em memória: não analisa reposit
 
 ## Verificação observada em 17/10/2026
 
-20 testes Node locais aprovados: `node --test tests/*.test.mjs`. TypeScript: `node node_modules/typescript/bin/tsc --noEmit --incremental false`. Fixture simples confirma textos, fingerprints, inventário e digest iguais ao Python PR #6; não prova paridade integral.
+23 testes Node locais aprovados: `node --test tests/*.test.mjs`. TypeScript: `node node_modules/typescript/bin/tsc --noEmit --incremental false`. Fixture simples confirma textos, fingerprints, inventário e digest iguais ao Python PR #6; não prova paridade integral. No runtime Workers, o scanner usa `redirect: manual` e rejeita toda resposta diferente de HTTP 200, sem seguir o destino de redirecionamentos. Se a cota pública compartilhada do GitHub acabar, a interface mostra o bloqueio e não cria uma autorização nem análise vazia.
 
 Navegador: exemplo fictício de nova análise, revisão para falso positivo e comparação. Não equivale a login e persistência hospedados homologados.
 

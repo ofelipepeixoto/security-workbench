@@ -88,6 +88,17 @@ test('streamed JSON is bounded without a trusted content length and errors never
   assert.equal((await rawError.text()).includes('token=abc'), false);
 });
 
+test('public GitHub quota exhaustion returns a safe retry message', async () => {
+  const db = database();
+  const limited = scanner({async repositoryMetadata() {throw Object.assign(new Error('sensitive source'), {name: 'GitHubRateLimitError'});}});
+  const result = await handleWorkbenchRequest(request({action: 'inspect', repo: REPO}), dependencies(db, {scanner: limited}));
+  assert.equal(result.status, 429);
+  const text = await result.text();
+  assert.match(text, /cota pública do GitHub/);
+  assert.doesNotMatch(text, /sensitive source/);
+  db.close();
+});
+
 test('authorization rechecks public metadata, preserves identity, and does not trust browser owner fields', async () => {
   const db = database();
   let repositoryId = 10;

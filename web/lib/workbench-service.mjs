@@ -113,7 +113,12 @@ export function createWorkbenchService({ db, ownerId, scanner = defaultScanner, 
           let repo;
           try { repo = scanner.normalizeRepo(payload.repo); }
           catch { throw new WorkbenchError('Informe um repositório público da conta ofelipepeixoto.'); }
-          const metadata = validateMetadata(await scanner.repositoryMetadata(repo), repo);
+          let metadata;
+          try { metadata = validateMetadata(await scanner.repositoryMetadata(repo), repo); }
+          catch (error) {
+            if (error?.name === 'GitHubRateLimitError') throw new WorkbenchError('A cota pública do GitHub foi atingida. Tente novamente mais tarde.', 429);
+            throw new WorkbenchError('Não foi possível conferir o repositório público no GitHub. Tente novamente mais tarde.', 503);
+          }
           return { repository: { repo, id: metadata.repository_id, branch: metadata.default_branch, html_url: `https://github.com/${repo}` } };
         }
         case 'authorize': {

@@ -47,7 +47,7 @@ def run() -> dict:
     require(os.environ.get("GITHUB_REPOSITORY_ID") == str(TARGET_ID), "ID do workflow divergente.")
     require(bool(os.environ.get("GITHUB_TOKEN")), "Credencial temporária do job não disponível.")
     metadata = _request_json(f"/repos/{TARGET_REPO}")
-    require(type(metadata.get("private")) is bool, "Visibilidade do alvo não confirmada.")
+    require(metadata.get("private") is False, "O smoke público exige que o repositório permaneça público.")
     require(metadata.get("id") == TARGET_ID and metadata.get("full_name") == TARGET_REPO, "Identidade de preflight divergente.")
     with tempfile.TemporaryDirectory(prefix="workbench-smoke-") as temporary:
         state = Path(temporary) / "workbench.sqlite3"

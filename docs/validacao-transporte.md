@@ -44,4 +44,4 @@ Documentação oficial consultada em 17/10/2026: [GITHUB_TOKEN](https://docs.git
 
 ## Preparação para visibilidade pública
 
-Esta evidência foi produzida quando o Workbench ainda era privado. O smoke continua restrito aos PRs do próprio repositório, ao nome e ID estáveis e ao commit fixo; a verificação da visibilidade agora exige apenas um valor booleano real da API, permitindo futuras execuções após uma eventual abertura do código. O job usa o token temporário de leitura do Actions em ambos os casos. A execução em repositório público ainda dependerá de validação após a mudança de visibilidade.
+Esta evidência foi produzida quando o Workbench ainda era privado. Depois da abertura autorizada, o smoke passa a exigir `private: false` da API antes de ler commits e blobs. O job continua restrito aos PRs do próprio repositório, ao nome, ID e commit fixos, com token temporário de leitura do Actions. O resultado do primeiro run público será registrado somente após sua conclusão; os números acima são históricos da execução privada.

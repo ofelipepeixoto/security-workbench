@@ -4,7 +4,7 @@ O Security Workbench é experimental. Ele analisa somente escopos autorizados e 
 
 ## Relatar uma falha no Workbench
 
-Não publique detalhes de exploração, credenciais, dados de terceiros ou provas de conceito sensíveis em issues e PRs. Se a opção **Report a vulnerability** estiver disponível na aba Security deste repositório, use o canal privado de GitHub Security Advisories. Se ela não estiver disponível, procure um canal privado do mantenedor no perfil GitHub. Na ausência de um canal privado visível, abra uma issue genérica pedindo um contato seguro, sem revelar detalhes técnicos.
+Não publique detalhes de exploração, credenciais, dados de terceiros ou provas de conceito sensíveis em issues e PRs. Use [Report a vulnerability](https://github.com/ofelipepeixoto/security-workbench/security/advisories/new) para enviar um relato privado pelo GitHub Security Advisories. O relato privado foi habilitado em 17/10/2026. Se o formulário estiver indisponível, abra uma issue genérica solicitando um contato seguro, sem revelar detalhes técnicos.
 
 Inclua, pelo canal privado: versão ou commit afetado, impacto, passos mínimos com dados fictícios e uma proposta de mitigação, se houver. O mantenedor irá confirmar o recebimento e coordenar correção e divulgação. Não há prazo formal de resposta neste estágio.
 

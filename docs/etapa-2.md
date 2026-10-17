@@ -21,3 +21,5 @@
 `python3 -m unittest discover -s tests -v`: 12 testes locais aprovados em 16/10/2026. Incluem API simulada, troca de ID 123→456, IDs inválidos/ausentes, migrações de ambas as versões anteriores, persistência, CLI e fluxo HTTP local com autenticação/CSRF.
 
 A [validação real](validacao-identidade.md) usa API pelo conector autorizado e uma cópia estática parcial de dois arquivos completos. O transporte direto de `scan-github` continua bloqueado no ambiente (`URLError`); não foi validado ponta a ponta nem substituído por credenciais do conector.
+
+Atualização de 17/10/2026: a [homologação no GitHub Actions](validacao-transporte.md) passou usando o cliente real em duas aquisições independentes de um commit do Workbench privado, pela CLI e pelo servidor HTTP local. A evidência acima de 16/10 permanece histórica; a restrição do workspace e a autenticação no computador do usuário são ambientes distintos do runner homologado.

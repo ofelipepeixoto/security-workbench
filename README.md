@@ -42,11 +42,13 @@ Arquivos grandes ou binários, pastas de dependências e links simbólicos são 
 python3 -m unittest discover -s tests -v
 ```
 
-Os testes usam valores artificiais e respostas simuladas da API. Verificam autorização, ausência de execução do alvo, redação dos valores, revisão, comparação, identidade e hashes da aquisição, migração do banco e proteção básica da interface. Ainda não são uma execução real contra a API do GitHub.
+Os testes locais usam valores artificiais e respostas simuladas da API. Verificam autorização, ausência de execução do alvo, redação dos valores, revisão, comparação, identidade e hashes da aquisição, migração do banco e proteção básica da interface. São distintos do smoke de integração real descrito abaixo.
 
 
 O escopo GitHub vincula nome e `repository_id` inteiro positivo. Mesmo nome com outro ID é recusado antes de ler commits/blobs. Cadastros locais sem ID continuam válidos para `scan`, mas bloqueiam `scan-github` até repetir `authorize` com ID revisado explicitamente. Um ID já vinculado não pode ser substituído por recadastro. As execuções guardam seu próprio ID; rever o escopo não promove o histórico antigo a verificado.
 
 Há migrações **SQLite locais**, idempotentes, em `workbench/store.py`: colunas `source`, `verified_revision` e `repository_id` em `runs`, e `repository_id` em `scope`. Não existem migrations Supabase nesta etapa. Dados anteriores são preservados, mas execuções sem ID perdem o rótulo de verificação de identidade.
 
-Veja [evidência real e limitação de transporte](docs/validacao-identidade.md). Os testes automatizados continuam simulados; a aquisição estática real por conector não comprova `scan-github` ponta a ponta.
+Veja a [evidência histórica de identidade](docs/validacao-identidade.md), as [correções de proteção da aquisição](docs/protecoes-aquisicao.md) e a [validação do transporte real](docs/validacao-transporte.md).
+
+O job `github-live` usa a credencial temporária do GitHub Actions, limitada à leitura do próprio Workbench, para executar o cliente real pela CLI e pela interface HTTP em loopback. Não é preciso criar um token pessoal para esse teste. A autenticação do processo local no seu computador continua separada, conforme as instruções acima. O ambiente de teste é Linux com Python 3.12; Windows ainda não foi homologado.

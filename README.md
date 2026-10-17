@@ -2,6 +2,14 @@
 
 Plataforma privada em construção para inspecionar ativos **autorizados**. O núcleo local analisa cópias ou lê arquivos de um commit específico pelo GitHub, sem executar código do alvo. Os resultados ficam em SQLite local.
 
+## Site e demonstração online
+
+[Abra a demonstração pública](https://security-workbench.camaleaoweb3.com.br/) sem login. Ela usa **apenas dados fictícios no navegador**: explore projetos, análise, revisão, relatório e comparação sem gravar no servidor ou analisar um repositório real.
+
+Para a operação real, o proprietário acessa a área autenticada com ChatGPT. O Site exige identidade no servidor antes de ler ou modificar projetos, análises e relatórios. Nesta versão hospedada, somente repositórios **públicos** de `ofelipepeixoto` podem ser cadastrados após confirmação de escopo. A aquisição fixa o commit, confere identidade e hashes e lê até 20 arquivos suportados; lacunas aparecem como cobertura parcial. Não há auditoria completa de CVEs nem execução de código do alvo. A leitura pública da API GitHub está sujeita à cota compartilhada por IP.
+
+O Site público é distinto desta interface Python local e do banco SQLite: a área hospedada usa D1 isolado. [Estado da publicação e verificações](docs/sistema-web-privado.md) · [PR #8 em rascunho](https://github.com/ofelipepeixoto/security-workbench/pull/8). O repositório continua **privado**; o link do código requer permissão no GitHub. Não inserir segredos ou dados sensíveis na demonstração.
+
 ## Interface local
 
 Requer Python 3.12; não há dependências externas. No diretório do projeto:

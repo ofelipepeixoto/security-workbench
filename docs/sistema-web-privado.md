@@ -4,13 +4,13 @@
 
 O usuário escolheu acesso por link privado. A área web reutiliza as regras e contratos do núcleo existente e simplifica a jornada: login ChatGPT → link do repositório → conferir identidade/confirmar escopo → analisar versão atual → revisar candidatos → relatório/histórico/comparação. SHA específico fica em opção avançada.
 
-O site foi criado com acesso `custom`, somente o proprietário. A versão 1 foi salva sem deploy; após autorização explícita do proprietário, a versão 7 foi publicada em ambiente privado. Não houve merge dos PRs ou alteração de audiência.
+O site foi criado com acesso `custom`, somente o proprietário. A versão 1 foi salva sem deploy; após autorização explícita do proprietário, a versão 8 foi publicada em ambiente privado. Não houve merge dos PRs ou alteração de audiência.
 
 - Projeto Sites: `appgprj_6ad3cd3180a481918c0f7b58dfd6f3e7`.
-- Versão publicada: 7, ID `appgprj_6ad3cd3180a481918c0f7b58dfd6f3e7~appgver_47f0475d0cd08191bc2ce8f7b1c41cba`.
-- Fonte Sites exata: `ae0096ce9be2713af866c51f1aca4d49c7db154b`.
+- Versão publicada: 8, ID `appgprj_6ad3cd3180a481918c0f7b58dfd6f3e7~appgver_9224cff46fac81918e1652d170d3673c`.
+- Fonte Sites exata: `dcb15b62b9c605dac28c0b1ee2b241a79baba86e`.
 - Endereço ativo, restrito ao proprietário: `https://security-workbench.radarjacarepagua.chatgpt.site`.
-- Versão 1 original permanece salva no histórico; as versões intermediárias são tentativas de diagnóstico e correção do runtime hospedado.
+- Versão 1 original permanece salva no histórico; as versões intermediárias registram diagnóstico e correção do runtime hospedado. A versão 8 remove um cache de compilação gerado da fonte e passa a ignorá-lo; a rota e as regras de análise são as mesmas da versão 7 homologada. O histórico persistiu após essa publicação.
 
 ## Arquitetura e dados
 

@@ -1,137 +1,170 @@
-# Pendências e próximos aceites — 21/10/2026
+# Pendências, evidências e próximos aceites — 21/10/2026
 
-Este registro fecha a publicação autorizada, sem confundir código publicado,
-configuração e homologação. A demonstração continua pública e fictícia. Nenhum
-merge, ampliação de acesso, serviço pago ou integração operacional nova é inferido
-da publicação.
+Este registro atualiza o estado anterior do mesmo dia. Implementação, teste local,
+PR, publicação e homologação são etapas distintas. A demonstração continua pública
+e fictícia; a operação real permanece restrita ao proprietário no servidor. Não
+houve merge, ampliação de escopo ou contratação de infraestrutura/IA paga.
 
-## Estado confirmado nesta conversa
+O candidato consolidado passou em **93 testes Node, 25 testes Python, TypeScript,
+lint global e build**. A verificação posterior reunindo os seis testes do helper
+do PR #30 passou em **99 testes Node**, com lint global aprovado; não foi uma nova
+compilação ou publicação do Site. Os erros anteriores de Hooks/lint foram corrigidos. Esses
+resultados não equivalem a OAuth, revisão persistida, download ou QA visual reais.
+O inventário local contém **19 entradas de rotas, incluindo APIs**; a rastreabilidade
+da interface está na [matriz de jornadas](matriz-jornadas-2026-10-21.md).
 
-- Site **v12**, fonte `236082902476a9c943629b1005a23b01682c7252`, com ambiente
-  **revisão 2** aplicado em deploy `succeeded` às 20:07:20 UTC / 17:07:20 BRT.
-- Página de acesso exclusivamente GitHub, sessão/expiração/logout no servidor,
-  restrição ao proprietário, busca de projetos, filtro do histórico e “Conta e
-  acesso” publicados. A navegação acesso/demonstração foi corrigida em produção.
-- OAuth App dedicada criada. Origem, Client ID, ID GitHub e chave interna legada
-  do proprietário configurados no servidor. A chave interna é segredo e não é
-  reproduzida neste documento. **Client Secret ausente; login flag false.**
-- D1 confirmou as tabelas aditivas de autenticação; suas linhas não foram lidas.
-  Nenhum projeto ou análise foi reatribuído para configurar o proprietário.
-- React/DOM/RSC **19.2.8**, sharp **0.35.5** e source-map-js **1.2.2** incorporados
-  no artefato publicado. Isso não encerra a manutenção das demais dependências.
-- Candidato combinado aprovado em 56 testes Node, 17 Python, TypeScript e build.
-  [CI do PR #22 aprovada](https://github.com/ofelipepeixoto/security-workbench/actions/runs/39668067881)
-  no commit `74920b432b1a7b4950f5fe6e22a449691764d4df`.
-- Recusas HTTPS sem cookies registradas: GET/POST à API 401; início OAuth 503
-  enquanto desabilitado. Após revisão 2, GET 401/start 503 novamente às 20:09 UTC.
-- `main` e pré-release `v0.1.0` continuam separados da fonte Sites. Não houve merge.
-  Os [issues #13](https://github.com/ofelipepeixoto/security-workbench/issues/13) e
-  [#14](https://github.com/ofelipepeixoto/security-workbench/issues/14) seguem abertos.
+A versão **13 foi publicada**, com deploy `succeeded` em **21/10/2026 às
+21:09:00.640880 UTC / 18:09 BRT**, fonte Sites
+`5074b95d7ce5fd6e84cb12ccc7881e6e3155e748`, deployment
+`appgdep_6ad929a7d4d88191b064307beba6f0bd` e ambiente **revisão 6**. O smoke no
+domínio personalizado observou oito páginas com HTTP 200 e `no-store`; isso é
+verificação HTTP, sem QA visual. A homologação autenticada completa continua
+pendente. O [registro anterior](publicacao-2026-10-21.md) documenta a v12 e deve ser
+lido com essa atualização factual.
 
-## Gates para encerrar a entrega operacional
+O operador posteriormente concluiu o preparo do runtime REA: emissão em 4 s e bundle em 2 s, com status zero e cinco hashes registrados. Depois concluiu a primeira análise nativa da fixture própria em sete segundos, com uma fonte/342 bytes, zero falhas e unidade encerrada. A checagem completa de tipos e a importação hospedada continuam pendentes; não foi nova publicação do Site.
 
-O proprietário realiza a entrada da credencial por mecanismo protegido. A
-engenharia retoma configuração, homologação e correções; o proprietário mantém
-a decisão humana sobre achados, merges e ampliação de escopo. Nada exige enviar
-segredos ou o identificador interno no chat.
+A preparação e a prova da fixture local estão encerradas: não repetir WSL, Node, Bubblewrap, dependências, compilação ou análise. O operador forneceu `FIXTURE_NATIVA_CONCLUIDA` e `native_fixture_completed:true` do PR #32. Os campos false de typecheck, importação e alvos não confiáveis são limitações explícitas. O próximo passo é importar o mesmo Evidence na área autenticada, sem outro helper ou bootstrap.
 
-| Ordem | Pendência | Bloqueio ou risco | Critério de aceite |
-| --- | --- | --- | --- |
-| 1 | Salvar `GITHUB_LOGIN_CLIENT_SECRET` como segredo no servidor | Credencial ainda não gerada/configurada; nunca enviar no chat | Configuração protegida presente, demais chaves preservadas, revisão aplicada por deploy de versão salva |
-| 2 | Homologar login GitHub real | Fluxo externo/cookies/callback ainda sem prova completa hospedada | Proprietário entra, mantém histórico esperado, nenhuma exigência de login ChatGPT operacional; falha desativa a flag e fica documentada |
-| 3 | Homologar fronteiras e sessão | Testes simulados não substituem provedor/hospedagem | Conta não autorizada, negação de consentimento, callback inválido/reutilizado, expiração e logout recusam acesso indevido; recarga não restaura sessão revogada |
-| 4 | Concluir issue #14 | Depende do login legítimo | Duas análises próprias de commits fixados, identidade/cobertura/horário/limites; candidato real revisado e persistido após recarga; comparação e Markdown baixado/inspecionado |
-| 5 | Completar prova de isolamento | Recusa HTTP já observada cobre somente os casos registrados | Sessão anônima não lê projetos, análises ou relatórios reais; outro proprietário não acessa dados cruzados |
-| 6 | Concluir issue #13 por grupos | Alertas residuais; inventários GitHub e npm têm bases diferentes | Fontes oficiais, versões/caminhos/alcance reconciliados, patches pequenos, lockfile/CI e versão hospedada conferidos em cada mudança |
-| 7 | Revisão humana e integração GitHub | Site contém combinação ainda não incorporada à main/release | Revisar bases e sobreposição dos PRs, aprovar ordem de integração, executar CI aplicável e decidir merge/release; sem merge automático |
-| 8 | Fechar qualidade e operação | Lint global legado e validação assistiva ainda incompletos | Corrigir erros de Hooks existentes; teclado/foco/zoom/mobile e mensagens testados; limites, retenção e revogação documentados e verificáveis |
+## Entrega, GitHub e publicação
 
-Se duas análises não produzirem candidato, registrar a ausência e usar a fixture
-segura em repositório próprio para testar revisão. Nunca produzir um achado
-inventado nem converter uma observação estrutural em vulnerabilidade confirmada.
+| Item | Estado | Evidência | Bloqueio | Próxima ação | Responsável | Aceite |
+| --- | --- | --- | --- | --- | --- | --- |
+| Repositório, proteção e release | Reconfirmados; sem merge | `main` em `cf906ef`, protegida; `v0.1.0` permanece pré-release experimental | Código em revisão/Sites ainda separado da main/release | Manter bases e checks rastreáveis em cada PR | Engenharia; proprietário decide integração | Main/release só mudam por revisão e processo autorizado; nenhuma inferência de merge pelo deploy |
+| Parsers — [PR #23](https://github.com/ofelipepeixoto/security-workbench/pull/23) | Rascunho remoto | Patches/lockfile separados, [triagem](triagem-continuacao-2026-10-21.md) e [CI 39675022954 aprovada](https://github.com/ofelipepeixoto/security-workbench/actions/runs/39675022954) | Revisão humana pendente | Conferir diff, fontes e smoke benigno | Engenharia/revisor | Versões/caminhos fundamentados; CI aplicável aprovada; sem descarte de alertas |
+| Rede das ferramentas — [PR #24](https://github.com/ofelipepeixoto/security-workbench/pull/24) | Rascunho remoto | Lockfile validado e [CI 39675028042 aprovada](https://github.com/ofelipepeixoto/security-workbench/actions/runs/39675028042) | Undici ainda possui avisos oficiais adicionais | Revisar este incremento e manter a exceção 7.30.1 abaixo | Engenharia/revisor | Não anunciar undici totalmente corrigido; políticas de instalação preservadas |
+| Toolchain — [PR #25](https://github.com/ofelipepeixoto/security-workbench/pull/25) | Rascunho remoto | Vite 8.1.6 e demais patches; [CI 39675042408 aprovada](https://github.com/ofelipepeixoto/security-workbench/actions/runs/39675042408) | Revisão e exceções dos pais legados | Conferir compatibilidade e build do conjunto final | Engenharia/revisor | Pares, lockfile, testes e artefato coerentes; sem major transitiva forçada |
+| Sessão e revogação — [PR #26](https://github.com/ofelipepeixoto/security-workbench/pull/26) | Rascunho remoto; testes locais aprovados | Isolamento, CSRF, geração e [CI 39675312581 aprovada](https://github.com/ofelipepeixoto/security-workbench/actions/runs/39675312581) | Homologação hospedada de saída, expiração e revogação | Revisar contrato/configuração e testar no servidor legítimo | Engenharia + proprietário | Sessão revogada não volta ao reativar operação; dados e owner canônico preservados |
+| Importação REA do núcleo — [PR #27](https://github.com/ofelipepeixoto/security-workbench/pull/27) | Rascunho remoto; CI aprovada | Importador/testes em [REA](rea-execucao-2026-10-21.md); [run 39676461219](https://github.com/ofelipepeixoto/security-workbench/actions/runs/39676461219) | Revisão humana e compatibilidade do Evidence nativo pendentes | Aplicar o parser existente à saída já produzida | Engenharia/revisor | Projeção segura; execução da fixture registrada separadamente da importação |
+| Backend D1, agregado e importação REA — [PR #28](https://github.com/ofelipepeixoto/security-workbench/pull/28) | Rascunho remoto; CI aprovada | API/contexto/CSRF/projeção; [run 39676610952](https://github.com/ofelipepeixoto/security-workbench/actions/runs/39676610952) | Revisão e homologação real | Conferir contratos, limites e isolamento na hospedagem | Engenharia/revisor | Projeção segura sem JSON bruto; dados filtrados por owner; CI e aceite hospedado delimitados |
+| Interface, qualidade e relatório — [PR #29](https://github.com/ofelipepeixoto/security-workbench/pull/29) | Rascunho remoto; correção de retry com CI aprovada | 102 Node, TypeScript, lint dos arquivos alterados e build; [run 39695867805 aprovado](https://github.com/ofelipepeixoto/security-workbench/actions/runs/39695867805) | Correção de retry ainda não publicada; revisão e QA hospedada | Conferir checks do head vigente e concluir aceite assistido | Engenharia/revisor | Rotas/filtros/recuperação coerentes; CI final aprovada; limitações de QA explícitas |
+| Pré-flight local — [PR #30](https://github.com/ofelipepeixoto/security-workbench/pull/30) | Aprovado pelo operador no executável privado | Helper `7e2dd12`/hash, `LIMITES_PREFLIGHT_OK`, 12 checks true; análise da fixture posteriormente concluída | Sem bloqueio deste preparo; alvos arbitrários não habilitados | Preservar binário e evidências; seguir para importação | Engenharia + proprietário | Não repetir pré-flight por causa dos campos false de contrato; não inferir auditoria integral da sandbox |
+| Retomada limitada do runtime — [PR #31](https://github.com/ofelipepeixoto/security-workbench/pull/31) | Concluída no WSL segundo o operador; PR em revisão | Commit `556976855559aefc8fb1c5556d6ccc87359375ef`/hash; emit 4 s, bundle 2 s e cinco hashes | Typecheck completo permanece separado | Preservar runtime; não repetir compilação | Proprietário + engenharia | Mesmos pins e artefatos; conclusão da análise está registrada no #32 |
+| Prova limitada da fixture — [PR #32](https://github.com/ofelipepeixoto/security-workbench/pull/32) | Concluída segundo retorno do operador | Helper `72b9b3a`/hash aprovado; 23:45:41–48 UTC, uma fonte/342 bytes, zero falhas, unidade encerrada; Evidence 31.834 bytes/hash abaixo | Importação hospedada e typecheck completo separados | Importar a saída existente, sem rodar o REA novamente | Proprietário + engenharia | Aplicação complete, semântica unknown; 1 finding nativo não confirma vulnerabilidade nem quantidade de candidatos projetados |
+| Retentativa da importação REA na interface — PR #29 | Corrigida em código; publicação e QA hospedada pendentes | 102 testes Node, incluindo resposta perdida após persistência, TypeScript, lint dos arquivos alterados e build de 19 rotas | A versão publicada não recebeu esta alteração | Revisar/publicar o incremento e validar a retentativa no navegador | Engenharia + proprietário | Mesmo projeto/SHA/bytes reutiliza requestId enquanto o formulário permanece aberto; resposta perdida não duplica análise; contexto alterado gera nova tentativa; nenhum JSON em storage |
+| Site v13 | Publicada; smoke HTTP concluído | Deployment/fonte/revisão 6 acima; oito páginas HTTP 200 com `no-store` | QA visual e homologação autenticada completas pendentes | Conferir jornadas na versão efetiva e complementar o registro | Engenharia + proprietário | Percurso real e limites observados registrados separadamente do deploy e do smoke |
+| Ordem de integração e próxima release | Pendente de revisão humana | #23 parsers → #24 rede → #25 toolchain → #26 sessão → #27 REA local → #28 backend D1 → #29 interface/qualidade | Bases empilhadas e sobreposição com #17–#22 | Revisar dependências entre PRs, evitar reaplicar mudanças e conferir CI de cada head | Proprietário + engenharia | Decisão explícita sobre merge/release; tag aponta para commit validado; Site e GitHub identificados separadamente |
 
-O lint global legado registrou quatro erros e dois avisos em Hooks; o código novo
-de acesso e sua correção de navegação passaram no lint direcionado. A prova mobile
-de 390 px não equivale a auditoria de acessibilidade ou teste com usuários.
+## Homologação autenticada e issue #14
 
-## Risco residual de dependências e autenticação
+O proprietário forneceu prova na v12 de **sessão GitHub identificada, um projeto
+REA cadastrado e uma análise concluída com zero candidatos**. Isso é avanço real;
+não manter como estado atual a antiga afirmação de que o Client Secret estava
+necessariamente ausente e o login indisponível. Não foram reproduzidos segredos,
+identificadores internos, capturas ou relatórios reais neste documento.
 
-O painel GitHub observado nesta conversa mostrava **38 alertas** (16 altos,
-15 moderados, 7 baixos, nenhum crítico), mas indicava processamento em 17/10.
-Não há evidência de recálculo desse painel após a publicação: as correções estão
-no Site e em PRs, ainda não em `main`. O conector não fornece o endpoint Dependabot
-e a conexão do navegador passou a expirar no fechamento. O próximo responsável
-deve consultar novamente o painel autenticado, sem descartar alertas em massa.
+Esse resultado não executou o engine REA: o projeto analisado se chama REA, mas a
+análise hospedada usa o scanner estático limitado do Workbench. Zero candidatos
+não prova segurança e não oferece um candidato para homologar revisão humana.
 
-O snapshot npm inicial tem **58 entradas / 52 GHSAs / 14 pacotes**, após os
-primeiros patches sharp/source-map-js e **antes** do patch RSC.
-A [nova consulta do lockfile final](dependencias-audit-pos-publicacao-2026-10-21.json),
-concluída às 20:14 UTC, apontou **57 entradas / 51 GHSAs / 13 pacotes**:
-27 altas, 22 moderadas, 8 baixas, nenhuma crítica. Package.json e lockfile foram
-comparados byte a byte com a fonte Sites publicada. O comando audit terminou com
-código 1 por existirem correspondências, sem falha de build/teste. Esse inventário
-inclui ferramentas; não comprova que cada caminho participa do runtime hospedado.
-Não deve ser subtraído dos 38 alertas GitHub nem interpretado como exploração.
+| Item | Estado | Evidência | Bloqueio | Próxima ação | Responsável | Aceite |
+| --- | --- | --- | --- | --- | --- | --- |
+| Login do proprietário e dados esperados | Parcialmente demonstrados na v12; repetir na v13 | Prova fornecida pelo proprietário de conta identificada, projeto e análise | Nova versão e ferramenta de navegador indisponível para completar o percurso | Entrar legitimamente na versão efetiva e conferir o mesmo histórico | Proprietário, com apoio da engenharia | Conta autorizada retorna aos dados canônicos; nenhuma eleição de primeiro cadastro ou associação por e-mail |
+| Lista de projetos e histórico | Recuperação implementada; QA hospedada pendente | Código separa carga/erro/vazio e explica cadastro; teste SSR de regressão | Relato anterior de lista vazia não teve causa de servidor confirmada | Conferir resposta válida e cadastro esperado; erro 401/5xx permanece visível com retomada | Engenharia + proprietário | Só mostrar ausência após resposta válida; lista significa projetos cadastrados, não descoberta automática de todos os repositórios GitHub |
+| Duas análises para aceite | Pendente | Fixture própria fixada abaixo; análise REA anterior teve zero candidatos | Falta executar e conferir duas novas aquisições hospedadas | Analisar duas vezes o commit autorizado, preservando IDs distintos, cobertura, horários e limites | Proprietário/operador | Duas análises independentes do mesmo repositório/commit, com identidade e origem registradas; nenhuma execução do alvo |
+| Revisão persistida | Não homologada | UI/API e testes locais existem; não há prova de candidato real revisado nesta hospedagem | Depende da fixture segura coberta pela aquisição | Revisar exclusivamente o candidato artificial como falso positivo e recarregar a URL | Proprietário/operador | A decisão reaparece no servidor após recarga e na análise correta; fixture não é chamada de vulnerabilidade |
+| Comparação | Não homologada no navegador | Comparação exige mesmo projeto/método; IDs explícitos e limites tratados | Duas análises elegíveis e acesso de navegador | Comparar as duas execuções fixadas e conferir o contexto | Proprietário/operador | IDs, commit, método, contagens e cobertura coerentes; não detecção não significa correção |
+| Markdown | Download efetivo ainda não homologado | Prévia e geração/exportação implementadas; testes locais/SSR | Falta download e inspeção do arquivo no navegador | Baixar Markdown da análise revisada e abrir o arquivo | Proprietário/operador | Arquivo corresponde à análise/decisão, contém cobertura/limites e não contém valores sensíveis |
+| Anônimo | Recusa HTTP também observada na v13; cobertura incompleta | GET `/api/workbench` retornou 401 com `no-store` na v13; POST anônimos às duas APIs retornaram 403 na borda, sem dados | POST 403 da borda não comprova qual resposta a autenticação da aplicação emitiria | Conferir IDs diretos, análises e relatórios sem sessão, separando borda e aplicação | Engenharia | Nenhum conteúdo real é revelado; respostas sem cache; IDs diretos também protegidos |
+| Método da API REA | Recusa de método observada na v13 | GET da API REA retornou 405 | Não demonstra autenticação da operação POST | Manter testes por método e a distinção de borda/aplicação | Engenharia | GET não importa artefatos; POST autorizado é homologado separadamente |
+| Outra conta válida e consentimento negado | Testes locais; percurso hospedado pendente | Autorização por ID estável e owner no servidor | Sessão legítima de outra conta e percurso externo ainda não testados | Testar recusa e cancelamento sem ampliar allowlist | Proprietário + engenharia | Outra conta não recebe sessão operacional nem lê/aciona dados; cancelamento tem recuperação clara |
+| Callback, PKCE e escopo | Parte observada antes da v13 | Callback inválido respondeu 303; início observado com PKCE e escopo vazio | Isso não comprova todo o retorno externo nem replay em produção | Repetir casos seguros de callback inválido/reutilizado e expiração na versão efetiva | Engenharia | Nenhum callback inválido/reutilizado cria sessão; escopo continua mínimo; sem registrar state, código ou tokens |
+| Logout, expiração e retorno | Não homologados na hospedagem atual | Implementação/testes de revogação e geração; proteção de retorno pelo cache implementada | Falta observação real após logout e término da sessão | Encerrar sessão, recarregar/voltar e testar API; conferir expiração | Proprietário + engenharia | Sessão encerrada/expirada não lê dados; retorno não restaura conteúdo operacional |
+| QA visual, mobile e acessibilidade | Bloqueada pelas ferramentas nesta rodada | Extensão do navegador travou; preview oficial CUA primeiro recusou conexão e depois rejeitou a URL por política explícita | Não foi possível realizar inspeção visual oficial do candidato | Retomar quando a integração funcionar ou registrar validação manual do proprietário | Engenharia + proprietário | Rotas/recarga/sidebar/menu mobile, teclado, foco, zoom, diálogos e estados verificados; nenhuma alegação de conformidade por SSR/build |
 
-Manutenção residual: undici/ws; Vite; js-yaml, brace-expansion, braces e fast-uri;
-browserslist/baseline-browser-mapping; Babel/esbuild; image-size/fflate. A classificação
-devDependencies não comprova ausência de um pacote no servidor. O snapshot não
-informou patch para braces; avaliar o pacote pai e as entradas, sem ocultar a
-exceção. Uma correspondência de versão não demonstra exploração.
+**Fixture para o próximo aceite:** repositório próprio
+`ofelipepeixoto/security-workbench`, repository ID **1419403320**, commit fixado
+**`b6652136a1047ff11b11c348608a0db354e2e0c1`**. Executar duas análises independentes,
+conferir a cobertura e usar somente o candidato artificial para a decisão
+**falso positivo**, recarga, comparação e Markdown. Se o arquivo da fixture não
+estiver na cobertura ou não houver candidato, registrar a ausência e a limitação;
+não inventar vulnerabilidade ou atribuir validade a uma credencial fictícia.
 
-O teto global de 20 fluxos OAuth pendentes pode causar indisponibilidade temporária.
-Avaliar mitigação e comportamento antes da abertura operacional. Desligar a flag
-suspende acesso, mas reativá-la pode restaurar sessões ainda válidas: não é
-revogação durável. Logout exige revogação confirmada em D1. Reversão deve conservar
-dados/schema e GitHub exclusivo; não restaurar o acesso ChatGPT da v10 como fallback.
+Os bloqueios de navegador são falhas/restrições observadas das ferramentas; não
+foram atribuídos a fingerprint, bot ou defeito confirmado do Site. Não houve
+contorno da rejeição nem substituição por navegador fora do fluxo autorizado.
 
-## Engenharia reversa: o que existe e o que falta
+## Dependências, issue #13 e riscos residuais
 
-O [estudo estático](rea-estudo-2026-10-21.md) inspecionou o REA no commit fixado
-`3e7c6302233ecbcb9b92e43ee5a60337738961bd`, licença, CLI, parser e limites. Também
-houve leitura limitada de HTML/JavaScript públicos de referência, sem executar o
-alvo, acessar conta ou enviar repositórios. **O REA não concluiu uma análise e não
-foi integrado ao Workbench.** Runtime compilado ausente e namespaces de isolamento
-sem rede indisponíveis bloquearam essa execução. Nenhuma restrição foi contornada.
+A [triagem por pacote, manifesto e caminho](triagem-continuacao-2026-10-21.md)
+e o [snapshot](dependencias-audit-continuacao-2026-10-21.json) registram a mudança
+npm de **57 para 3 entradas**: uma alta, uma moderada e uma baixa. Não são três
+alertas Dependabot, não incluem todos os avisos oficiais de undici e não comprovam
+exploração ou ausência de alcançabilidade no runtime. A contagem GitHub de
+**38 abertos** continua histórica e **não foi recontada nesta retomada**.
 
-O passo a passo de ativação deve ocorrer depois dos gates anteriores:
+| Item | Estado | Evidência | Bloqueio | Próxima ação | Responsável | Aceite |
+| --- | --- | --- | --- | --- | --- | --- |
+| Painel Dependabot | Reconsulta pendente | Último painel: 38 abertos; inventário npm é outra fonte | Endpoint ausente no conector e navegador indisponível | Consultar painel autenticado quando a integração permitir; reconciliar com main/head publicado | Engenharia/proprietário | Contagem datada, alertas agrupados por pacote/manifesto/caminho/uso; sem descarte em massa |
+| braces 3.0.3 — alta | Residual, sem patch informado no registro consultado | GHSA-vfj7-8cjw-p6xm; caminhos/condições na triagem | Não há versão corrigida publicada confirmada | Reavaliar fast-glob/micromatch e patch do mantenedor; manter globs em configuração confiável | Engenharia de dependências | Solução suportada ou exceção fundamentada com limites; não ocultar o alerta |
+| esbuild 0.18.20 — moderada | Residual no ramo Drizzle | GHSA-67mh-4wv8-2f99; drizzle-kit → loader → esbuild | Troca de major forçada pode quebrar o pai | Atualizar/remover o loader por combinação suportada e testar geração de migração | Engenharia de dependências | Migração/schema conferidos sem aplicar em produção por conveniência; ferramentas dev não expostas |
+| esbuild 0.27.3 — baixa | Residual no ramo Wrangler | GHSA-g7r4-m6w7-qqqr; condição do servidor dev no Windows | Atualização depende da combinação Cloudflare/Wrangler | Preparar PR próprio do pai e testar build/runtime | Engenharia de dependências | Ferramentas em loopback; combinação suportada; nenhum binário/API substituído à força |
+| undici 7.29.1 — avisos adicionais | Residual fora da resposta npm audit | Mantenedor publicou correções adicionais em 7.30.1; fontes na triagem | Política de idade mínima de sete dias preservada | Reavaliar/fixar/testar 7.30.1 a partir de **22/10/2026 às 11:18:31 BRT** | Engenharia de dependências | Fonte oficial e elegibilidade confirmadas, lockfile/CI/build atualizados; política não reduzida |
+| Incorporação efetiva das dependências | Fonte v13 publicada; correspondência a registrar na manutenção | Fonte Sites acima e manifests/lockfile dos PRs #23–#25 validados | Registro final deve vincular cada grupo à versão efetiva | Conferir/publicar a correspondência de manifests/lockfile e fonte v13 | Engenharia | Versão/deployment correspondem às dependências corrigidas; GitHub main continua identificado separadamente |
+| Disponibilidade OAuth e suspensão | Controles implementados; prova operacional pendente | Limite de fluxos, revogação e geração de sessão no candidato | Limitar fluxos não prova resistência a exaustão; flag isolada não é revogação durável | Conferir comportamento e usar revogação/geração quando a suspensão precisar invalidar sessões | Engenharia + proprietário | Reativar operação não restaura sessões explicitamente revogadas; sem apagar histórico ou reintroduzir outro provedor |
 
-1. Disponibilizar ambiente de execução que imponha isolamento sem rede; não
-   executar o analisador dentro do Worker público nem contratar VPS automaticamente.
-2. Preparar runtime rastreável a uma versão/commit do REA, preservar licenças e
-   conferir diferença entre o checkout estudado e o pacote npm.
-3. Aceitar somente arquivos JavaScript locais fornecidos pelo operador, com
-   digest e limites externos de bytes, arquivos, tempo e memória. Não executar o
-   código alvo, instalar suas dependências ou usar o modo de navegador/runtime.
-4. Testar uma fixture benigna e outra com efeitos que não podem acontecer.
-   Verificar ausência de rede, escrita indevida e execução de código do alvo.
-5. Conferir uma saída estática real, cobertura e omissões; adaptar fatos para
-   candidatos com origem/confiança e revisão humana, em PR próprio.
+## REA: fixture local concluída; importação hospedada pendente
 
-Análise estática pode reconstruir estrutura observável dos artefatos fornecidos;
-não recupera código privado do servidor nem garante cobertura completa. Observar
-um site em execução é outra modalidade e exigiria nova definição explícita do
-escopo, pois a autorização atual proíbe executar o código do alvo.
+| Item | Estado | Evidência | Bloqueio | Próxima ação | Responsável | Aceite |
+| --- | --- | --- | --- | --- | --- | --- |
+| Importação local Python/SQLite | Implementada e testada; PR #27 aberto | 25 testes Python, incluindo importação; fixtures sintéticas; [contrato REA](rea-execucao-2026-10-21.md) | Revisão/CI e plataforma do operador | Revisar origem, limites, projeção, relatório e comparação | Engenharia/revisor | JSON bruto não persiste; observações começam como candidate; commit/cobertura/hashes declarados não viram aquisição verificada |
+| Importação web/D1 | Implementada no backend #28 e fonte v13; QA real pendente | Parser da fonte publicada reconferido e igual ao PR #27; Evidence nativo privado disponível | Falta aplicar o parser ao arquivo e observar persistência hospedada | Projetos → Importar REA local; usar o projeto/commit da fixture e o mesmo evidence.json | Proprietário + engenharia | Fonte rea-import, cobertura parcial e vínculo declarado explícitos; recarga/revisão/Markdown conferidos; até 100 candidatos |
+| Execução real do engine REA | Primeira fixture inerte concluída segundo retorno do operador | Motor `3e7c6302233ecbcb9b92e43ee5a60337738961bd`; uma fonte/342 bytes, zero falhas, sete segundos e unidade encerrada | Não habilita entradas arbitrárias ou execução dinâmica | Preservar artefatos e importar a saída existente | Engenharia + proprietário | Limites e controles do helper fixado aprovados; observação estrutural não é vulnerabilidade |
+| Typecheck completo do motor REA | Pendente; a retomada usa `--noCheck` | [Registro da falha](rea-execucao-2026-10-21.md); compilador 7.0.2 fixado suporta emissão sem checagem completa | Compilação completa não passou; emitir JS não comprova tipos corretos | Emissão e bundle passaram; investigar e validar typecheck completo separadamente | Engenharia | Exceção explícita até checagem do commit fixado aprovada; não confundir com TypeScript web |
+| Node 24 e permissões | Diagnóstico concluído; insuficiente para o gate | Node 24.19.0 com permissões conectou a fixture TCP em loopback; worker REA usa processo filho | Flag não bloqueia rede e não estabelece sandbox herdada do worker | Usar uma fronteira efetiva de processo/rede/filesystem, sem contornar bloqueios atuais | Engenharia | Fixture sentinela não conecta nem escreve; heap/timeout não são anunciados como sandbox |
+| Ambiente Windows do operador | Preparo e primeira prova no Ubuntu/WSL 2 concluídos | Node Linux 24.19.0, Bubblewrap privado 0.13.1, dependências/runtime fixados; resultado do #32 | Windows nativo e entradas arbitrárias não homologados | Prosseguir pela plataforma sem reinstalar/recompilar | Proprietário, com apoio da engenharia | Resultado limitado ao ambiente WSL e à fixture própria |
+| Pacote Bubblewrap e CVE-2026-87766 | Versão privada corrigida compilada e aprovada no pré-flight; pacote do sistema separado | Última consulta do Ubuntu: `0.11.1-1ubuntu0.1`, candidato `0.11.1-1ubuntu0.3`; [reversão em 0.3](https://ubuntu.com/security/notices/USN-8779-2); binário privado 0.13.1/hash conferido e 12 controles aprovados | Pacote do sistema não foi substituído; prova posterior usa o binário privado | Manter seleção explícita do binário privado em cada operação do Workbench | Engenharia + proprietário | Fonte/hash e executável identificados; controles reais sem fallback, PPA, upgrade global ou desativação de AppArmor; nenhuma exploração anunciada |
+| Ferramentas de compilação Bubblewrap | Concluídas; `FERRAMENTAS_BWRAP_OK` fornecido pelo operador | GCC 15.2.0, Python 3.14.4, Meson 1.10.1, Ninja 1.13.2, libcap 2.75; APT 44 novos/5 atualizados/0 remoções/126 não atualizados | Nenhum bloqueio dessa preparação; motor REA é outra etapa | Preservar instalação e importar a saída nativa existente | Proprietário, com apoio da engenharia | Python Meson não é homologação do núcleo Python 3.12; instalação de compilador não vira execução de análise |
+| Bubblewrap privado 0.13.1 | Compilado e pré-flight aprovado segundo retorno do operador | Versão 0.13.1, `BWRAP_COMPILADO_OK`, digest `d7e217424a96140625d3e83df81e66a9e91de40ed9f882d07505da99fa005a76`; helper fixado com `passed:true`/12 checks e `LIMITES_PREFLIGHT_OK` | Pré-flight próprio aprovado; execução posterior do engine na fixture concluída | Preservar o executável e os artefatos; seguir para importação da saída existente | Proprietário, com apoio da engenharia | Sem recusa de namespace no percurso observado; não anunciar auditoria completa ou usos arbitrários da sandbox |
+| Limites de recursos no WSL | Conferidos pelo helper fixado na unidade da análise concluída | Cgroup 1 GiB, swap zero, 64 tarefas, uma CPU e prazo global 30 s; conclusão em 7 s | Não há medição de CPU/pico de memória dessa análise | Preservar configuração e registro da tentativa | Engenharia + proprietário | Limites não são apresentados como consumo; nenhum teste de sobrecarga/OOM necessário |
+| Prova mínima do engine | Concluída para a fixture própria inerte | `native_fixture_completed:true`, `FIXTURE_NATIVA_CONCLUIDA`, resumo nativo e hash registrado | Typecheck completo, projeção real e escopo adversarial continuam separados | Conferir a projeção do mesmo Evidence no importador existente | Engenharia + proprietário | Rede/entrada/recursos e término verificados pelo helper; semântica unknown e prontidão para alvos não confiáveis false |
 
-## Backlog posterior, sem ativação automática
+## Expansões posteriores aos gates
 
-| Próxima fatia | O que falta | Aceite mínimo |
-| --- | --- | --- |
-| Sites explicitamente autorizados | Adaptador com proteção SSRF, política de domínio/caminhos e revalidação DNS/IP/redirecionamentos | HTTPS válido, limites, bloqueio de rede privada/metadados, falha relatada como cobertura parcial; início controlado no domínio autorizado |
-| Repositórios privados e organizações | GitHub App própria de leitura mínima, instalação e seleção verificadas | Credencial curta só no servidor; revogação, expiração, 403, isolamento e repository/installation IDs testados; OAuth de login não substitui App |
-| Advisories/CVEs dos alvos | Inventário/versionamento, fonte e intervalos com proveniência | Distinguir inventário, correspondência e confirmação humana; limites e cache; Dependabot do Workbench não cobre os alvos |
-| UX e métricas | Agregados reais por decisão, filtros de achados/atividade e duração fundamentada | Nenhum contador fictício; persistência e contagem sem duplicação; validação de correção separada de “não detectado novamente” |
-| Monitoramento/webhooks | Runtime assíncrono, assinatura, idempotência, pausa e revogação | Replay/duplicação/falha limitados e testados; sem execução recorrente implícita |
-| Bancos, Supabase, n8n, VPS e agentes/MCP | Necessidade, custo, contratos, isolamento e operação demonstrados | Projeto e autorização próprios, restauração/reversão testadas; nenhuma despesa ou IA paga automática |
+| Item | Estado | Evidência | Bloqueio | Próxima ação | Responsável | Aceite |
+| --- | --- | --- | --- | --- | --- | --- |
+| Sites explicitamente autorizados | Planejado, sem adaptador operacional novo | [Contrato do roadmap](proximas-integracoes.md) | SSRF, DNS/IP e redirecionamentos precisam de implementação e teste | Começar pelo domínio autorizado `camaleaoweb3.com.br`, com política de host/caminhos/portas e escopo explícito | Engenharia + proprietário | HTTPS válido; revalidação em cada conexão/redirect; bloqueio de privados/metadados; bytes/tempo/requisições limitados; falha vira cobertura parcial |
+| Privados e organizações por GitHub App | Planejado; login OAuth não instala App | Leitura pública atual; estados separados na UI | App, instalação, seleção e credenciais curtas ainda ausentes | Projetar leitura mínima por repository/installation ID e revogação | Engenharia + proprietário | Credencial curta somente no servidor; expiração, revogação, 403, rate limit e isolamento testados; sem escopo ampliado implicitamente |
+| Advisories/CVEs dos alvos | Planejado; inventário atual não consulta CVEs | Scanner/relatórios distinguem inventário | Falta fonte, correspondência de versão e contrato de consultas | Implementar proveniência, intervalos, cache e limites em fatia própria | Engenharia | Inventário, correspondência e confirmação humana separados; versão desconhecida não vira ausência de CVE |
+| Correção verificada e duração | Pendente; métricas de decisões já implementadas com amostra explícita | Dashboard/achados e matriz de jornadas | Não há evidência própria de correção nem horários completos para duração | Definir candidato → mudança → nova evidência → decisão; acrescentar duração só com timestamps adequados | Produto/engenharia | Não detecção não confirma correção; nenhum contador ou tempo estimado apresentado como fato |
+| Monitoramento, webhooks e notificações | Planejado, sem ativação | UI informa análise manual | Runtime assíncrono e contrato de eventos ausentes | Definir assinatura, idempotência, quotas, pausa e revogação | Engenharia + proprietário | Replay/duplicação/falha testados; nenhuma execução recorrente implícita |
+| Bancos, Supabase, n8n, VPS e agentes/MCP | Preparação opcional; VPS Hostinger existente informada pelo proprietário | SQLite/D1 atendem ao estágio atual; VPS não foi inspecionada | Capacidade, serviços existentes, ganho, custo e isolamento ainda não avaliados | Avaliar somente após os gates, com projeto e autorização próprios | Proprietário + engenharia | Necessidade mensurada, restauração/reversão testadas; nenhuma infraestrutura ou IA paga ativada automaticamente |
 
-Os estudos #3/#4 e a fixture #16 não constituem funcionalidades publicadas por
-estarem em branches. A combinação #22 inclui bases de #17/#20, patches #18/#19 e
-documentação #21; revisar sobreposições antes de integrar para não reaplicar as
-mesmas mudanças. O [roadmap](proximas-integracoes.md) mantém os contratos de cada
-expansão. A matriz UX registra a base anterior examinada: busca de projetos,
-filtro do histórico e “Conta e acesso” já foram implementados depois dela.
+O diagnóstico anterior do Windows pode ter disparado o instalador; a mudança foi
+reconhecida. O proprietário concluiu o WSL e a preparação acima. Os controles
+observados no WSL2 são avanço de infraestrutura local, sem prova de execução do
+engine REA. O helper do PR #30 foi baixado no commit `1b0c93114d7a215aa73844e5a7edd62620dd25eb`, teve SHA-256 `8dbafa2690bd4dd90e7aa6e60dfd4af5b0139a77b4462625e3676be39d1cc535` conferido e retornou `passed:true`, com os 12 checks true, segundo a saída fornecida pelo operador. `memory_enforced` e `ready_for_rea` permaneceram false, pois o helper não configura o futuro executor. Não houve execução do motor.
 
-O [guia de login](autenticacao-github.md) contém o passo manual imediato. O valor
-do segredo não deve ser enviado; basta informar **“segredo configurado”**. Manter
-a flag false até retomar a homologação autorizada. O identificador interno do
-proprietário já está configurado e não precisa ser enviado ou recriado.
+Posteriormente, o checkout REA fixado e o npm separado foram conferidos. O operador relatou instalação de 409 pacotes sem scripts de instalação, lockfile íntegro e `DEPENDENCIAS_OK`. O aviso de manutenção de `prebuild-install@7.1.3` foi preservado. A compilação completa falhou com dois eventos distintos de OOM/timeout e sem as cinco sentinelas finais; os [detalhes de preparação e do gate Bubblewrap](rea-execucao-2026-10-21.md) distinguem instalação com rede, build da ferramenta e futura análise offline.
+
+A reversão deve preservar owner canônico, dados, schema aditivo e GitHub exclusivo.
+Preferir uma revisão revisada que suspenda a operação real quando necessário.
+Retornar à v10 exige decisão explícita do proprietário por reintroduzir o fluxo
+ChatGPT anterior. O próximo marco concreto continua sendo concluir a homologação
+com a fixture própria; a publicação de código não encerra os issues #13 e #14.
+
+### CI e correspondência com a publicação
+
+O primeiro [run do #29, 39676799305](https://github.com/ofelipepeixoto/security-workbench/actions/runs/39676799305), passou em Python, aquisição GitHub real e no job web completo (93 testes, TypeScript e build), mas falhou no job independente `web-scanner`: ele não instala npm e passou a incluir um teste SSR que importa React. A correção mantém a suíte completa em `web-build` e seleciona explicitamente os seis arquivos sem dependências no job do scanner; os **84 testes desse comando passaram localmente**. O [run posterior 39677336330](https://github.com/ofelipepeixoto/security-workbench/actions/runs/39677336330) terminou com success em todos os jobs. O run inicial continua registrado como falha; conferir os checks do head vigente após este registro documental.
+
+Foram comparados os **87 arquivos públicos web** com a fonte Sites salva/publicada, sem diferenças de conteúdo. SHA-256 de `package.json`: `b4735a52775a731759c27edf013b61c5dbda56a32439910aa4225a3bdb84fd30`; do lockfile: `8449ddd502e9380316fcda678d4d1dc52c7fd31e29384f3c3dd21c8adf6d5032`. O ajuste posterior do workflow e os documentos não alteram o artefato web publicado. O CI valida aquisição no Actions; não substitui a sessão do proprietário no Site.
+
+### Verificação de repetição e continuidade
+
+A leitura do helper do PR #32 não encontrou retry automático ou loop infinito. Há uma chamada da CLI; os loops percorrem listas finitas e arquivo de estado local limitado. Worker tem orçamento de 5 s; unidade, prazo de 30 s com stop de 2 s; cliente, 40 s com KILL após mais 2 s. Consulta da unidade e projeção têm limites próprios. Os pré-checks locais de versão/Git/hash não possuem um prazo global próprio. Isso é uma auditoria do código, sem inspeção de processos ativos no Windows/WSL do operador.
+
+O excesso de etapas de condução foi corrigido pela decisão de não reabrir o preparo já aprovado. O operador concluiu esse aceite: `FIXTURE_NATIVA_CONCLUIDA`, resumo `native_fixture_completed:true`, um arquivo analisado, zero falhas de parse, 342 bytes e término da unidade confirmado. Typecheck completo e cobertura semântica desconhecida continuam limitações explícitas, sem exigir recompilação para repetir esta fixture fixa.
+
+A evolução da plataforma avançou independentemente: a interface agora preserva o requestId em retentativas da mesma importação após erro de rede. Um teste com a rota real e SQLite de memória simula persistência seguida de resposta perdida e confirma uma única análise no retry. O identificador fica somente na memória do formulário; fechar/reabrir, recarregar ou alterar contexto inicia outra tentativa e exige conferir o histórico se a resposta anterior foi incerta. Não foi observada duplicação real em produção; a correção cobre o caminho reproduzido no teste. Nenhum novo helper de instalação, PR de bootstrap, merge ou deploy foi criado para essa correção.
+
+A comparação anterior dos 87 arquivos públicos com a fonte v13 refere-se à revisão anterior à correção de retentativa. O head que adiciona o rastreador de tentativa modifica a fonte web e ainda não está incorporado ao Site publicado; não reutilizar aquela comparação como prova desse novo head. Este incremento passou em 102 testes Node, TypeScript, lint dos arquivos alterados e build; o núcleo Python não mudou e não foi retestado localmente neste incremento.
+
+### Resultado nativo posterior e menor próximo passo
+
+O operador executou o helper do #32 fixado em `72b9b3a14f306305c02efe07962ab3205f9ec1fd`, após conferir SHA-256 `45f9bc988d86b7cf275f89cc7b9b1f20e038d83a8f218c76f7844b7a6617371c`. A análise começou em 21/10/2026 às 23:45:41 UTC e terminou às 23:45:48 UTC (20:45:41–48 BRT). O resumo registrou grafo com 4 nós/3 arestas, cobertura de aplicação complete, semântica unknown, 1 finding nativo e 6 limitações. Não foi confirmada vulnerabilidade.
+
+O Evidence tem 31.834 bytes e SHA-256 `a0919437dff28879897da289284199daea0f88ccb57a3dea047f61ef8e6581a4`. O digest da raiz declarado pelo REA é `fbb1642452f6296f6113c9978a5af9f8ee769592e226ca98f5d01e6359dffc41`; não é o hash medido do arquivo de entrada. JSON bruto, logs e caminhos pessoais não foram copiados ao Git. `typecheck_complete`, `ready_for_untrusted_targets`, `workbench_import_verified` e `loopback_control_repeated` permanecem false. O listener de loopback anterior não foi repetido.
+
+O parser web da fonte v13 foi comparado ao módulo do PR #27 em `1e100c5c7b7b9ff43c9836cc38e9a7f8ed5d5f02`: mesmo SHA-256 `8208ec2f6c204c847e25d4b57ac36e5f07410fe9a1ecac98d9668f455901a0a6`, sem dependências externas. Isso confirma o código aplicado pelo servidor, ainda não sua aceitação dos bytes privados. Não é necessário outro helper, download de parser ou análise local: a importação autenticada testa diretamente parser, autorização e persistência.
+
+Em Projetos, cadastrar `ofelipepeixoto/security-workbench`/ID `1419403320` se necessário. Usar **Importar REA local**, esse projeto, commit declarado da fixture `1b0c93114d7a215aa73844e5a7edd62620dd25eb` e o `evidence.json` da execução concluída. Não usar o projeto REA ou o SHA do motor. Após um envio, conferir a análise criada, recarregar sua URL e baixar Markdown. Se a resposta for incerta, consultar o histórico antes de reenviar: o retry corrigido do #29 ainda não está publicado. A quantidade de candidatos só será registrada depois da projeção efetiva; zero é um resultado possível e não uma falha de instalação. Essa importação não substitui as duas aquisições GitHub exigidas no issue #14.

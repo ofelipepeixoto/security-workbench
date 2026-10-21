@@ -2,7 +2,9 @@
 
 Registro inicial de 21/10/2026: código publicado no **Site v12**, incluindo a fronteira do PR #17 e as correções #18/#19. A publicação inicial passou às 19:53:34 UTC, com fonte `236082902476a9c943629b1005a23b01682c7252` e revisão de ambiente 1. O redeploy da mesma versão com a **revisão 2 passou às 20:07:20 UTC**, deployment `appgdep_6ad91b6813f08191bf3a8e0491c0a2a1`. Naquele registro, o login real não estava homologado, a flag estava desabilitada e faltava o Client Secret. Consulte o [registro da publicação](publicacao-2026-10-21.md).
 
-Na continuação, a consulta a metadados da revisão de ambiente 5 confirmou Client Secret e owner configurados como segredos, com `GITHUB_LOGIN_ENABLED=false`, sem ler seus valores. Esses metadados não comprovam aplicação dessa revisão, autenticação ou homologação operacional. O resultado do fluxo real deve ser registrado depois da observação no ambiente publicado.
+Na continuação, a revisão 5 confirmou Client Secret e owner como segredos, sem ler seus valores. A revisão **6** habilitou somente `GITHUB_LOGIN_ENABLED=true` e foi aplicada à v12 às 20:38:46 UTC. O proprietário forneceu captura após login mostrando seu painel com um projeto REA, uma análise concluída e zero candidatos; metadados D1 confirmaram o projeto e o histórico legado, sem leitura de relatórios ou linhas de autenticação. Isso comprova entrada e vínculo ao histórico, não revisão/comparação/download.
+
+A **v13** foi publicada com a revisão 6 às **21:09:00 UTC / 18:09 BRT**, fonte `5074b95d7ce5fd6e84cb12ccc7881e6e3155e748`, deployment `appgdep_6ad929a7d4d88191b064307beba6f0bd`. Inclui o versionamento de sessão abaixo e exige novo login. O smoke anônimo no domínio canônico confirmou páginas públicas 200 e `GET /api/workbench` 401/no-store. POSTs anônimos foram negados com 403 na borda; esse resultado não foi atribuído ao gate do aplicativo. A homologação completa continua no [relatório de pendências](pendencias-2026-10-21.md).
 
 ## Escolha e limites
 
@@ -26,9 +28,9 @@ D1 conserva hashes, IDs, timestamps e o verificador PKCE temporário, nunca toke
 
 Revogar a autorização na conta GitHub impede novas trocas, mas não encerra imediatamente a sessão local já emitida: ela pode durar até 12h. Desabilitar login no servidor suspende o acesso enquanto a flag estiver desligada; reativar a mesma configuração pode tornar válidas novamente as sessões ainda não expiradas. Para sair desse navegador, usar logout e conferir sua conclusão. Para revogação durável, invalidar explicitamente os registros de sessão no D1 correto antes de reativar; não basta alternar a flag ou alterar e depois restaurar a associação. Não há endpoint remoto de revogação automática nem promessa de propagação instantânea. Backup D1 deve tratar registros de autenticação como sensíveis.
 
-## Hardening desta continuação — ainda depende de publicação
+## Proteções de sessão publicadas na v13
 
-O runtime em revisão aceita `config.sessionVersion`, fornecido pelo servidor por `GITHUB_SESSION_VERSION`. O valor é uma string decimal positiva de até 12 dígitos, sem zeros iniciais; se ausente, usa `1`. Configuração inválida fecha o acesso. A versão integra o hash de associação dos fluxos e das sessões, sem nova tabela ou migração. A primeira publicação dessa alteração invalida as associações emitidas pelo hash anterior e exige novo login.
+O runtime aceita `config.sessionVersion`, fornecido pelo servidor por `GITHUB_SESSION_VERSION`. O valor é uma string decimal positiva de até 12 dígitos, sem zeros iniciais; se ausente, usa `1`, como na configuração publicada. Configuração inválida fecha o acesso. A versão integra o hash de associação dos fluxos e das sessões, sem nova tabela ou migração. A primeira publicação dessa alteração invalida as associações emitidas pelo hash anterior e exige novo login; o comportamento hospedado de um cookie antigo ainda precisa ser observado.
 
 Para invalidar sessões por configuração, suspender a operação pela flag, incrementar a versão (por exemplo, de `1` para `2`) e aplicar a revisão de ambiente com código que suporte essa versão. Conferir que o cookie antigo já não concede acesso antes de retomar o login. Preservar a versão nova nos deploys seguintes: **não reutilizar nem diminuir valores**. O banco não mantém um contador mínimo; restaurar uma versão antiga pode restaurar sessões ainda válidas. Se não for possível garantir essa continuidade, revogar explicitamente os registros de autenticação no D1 correto. Trocar owner ou apagar projetos não faz parte desse procedimento.
 
@@ -65,7 +67,7 @@ O prazo do fluxo, o consumo único do state, o vínculo ao cookie e o PKCE conti
 
 Na etapa seguinte, habilitar a flag pelo mecanismo disponível e, em navegador sem sessão ChatGPT, abrir `/access` para seguir o login GitHub. A hospedagem ainda precisa demonstrar o encaminhamento correto dos cookies `__Host-`, múltiplos Set-Cookie e rotas OAuth durante o fluxo real. Se a plataforma interceptar rotas/cookies, exigir ChatGPT antes do fluxo ou o login não retornar corretamente, desligar a flag e registrar o bloqueio observado. Não oferecer outro provedor nem contornar controles. Continuar o roteiro abaixo somente com o acesso GitHub efetivamente validado.
 
-Os passos manuais acima descrevem a preparação inicial; a revisão 5 já registra o segredo configurado em seus metadados. Não gerar outro segredo apenas para repetir esse histórico. A ativação e o fluxo completo devem receber evidência própria: configuração e testes simulados não devem ser descritos como homologação real. Para outro domínio de homologação, usar App/callback e configuração canônica próprios, sem HTTP de preview para login real.
+Os passos manuais acima descrevem a preparação inicial: o segredo já está configurado e a revisão 6 está aplicada com a flag habilitada. Não gerar outro segredo nem repetir essa configuração. A entrada do proprietário foi observada na v12; os demais aceites continuam separados no roteiro abaixo. Para outro domínio de homologação, usar App/callback e configuração canônica próprios, sem HTTP de preview para login real.
 
 ## Roteiro de homologação real
 

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { createWorkbenchService, handleWorkbenchRequest, handleReaImportRequest } from '../lib/workbench-service.mjs';
+import { newReaImportAttemptTracker } from '../lib/rea-import-attempt.mjs';
 
 const REPO = 'ofelipepeixoto/rea';
 const REVISION = 'a'.repeat(40);
@@ -442,4 +443,33 @@ test('GitHub acquisition and REA import never reuse the other method under concu
   assert.equal(results.find(result => result.status === 'rejected').reason.status, 409);
   assert.equal((await svc.list()).runs.length, 1);
   db.close();
+});
+
+
+test('REA client retry after a lost response reuses one persisted analysis', async t => {
+  const db = database();
+  t.after(() => db.close());
+  const svc = createWorkbenchService({ db, ownerId: 'owner-a', scanner: scanner() });
+  const project = await authorize(svc), evidence = reaFixture();
+  const reportDigest = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(evidence)))]
+    .map(value => value.toString(16).padStart(2, '0')).join('');
+  const attempts = newReaImportAttemptTracker(), token = 'c'.repeat(43);
+  let lost = true;
+  async function send() {
+    const requestId = attempts.resolve({ projectId: project.id, commitSha: REVISION, reportDigest });
+    const response = await handleReaImportRequest(request({ projectId: project.id, revision: REVISION, requestId, evidence },
+      { 'X-Workbench-CSRF': token }, '/api/workbench/rea'),
+    dependencies(db, { getUser: async () => ({ userId: 'owner-a', provider: 'github', csrfToken: token }) }));
+    assert.equal(response.status, 200);
+    if (lost) { lost = false; throw new TypeError('simulated response lost after persistence'); }
+    return { ...await response.json(), requestId };
+  }
+  await assert.rejects(send(), /simulated response lost/);
+  const repeated = await send();
+  assert.equal((await db.prepare('SELECT COUNT(*) AS count FROM workbench_runs').bind().first()).count, 1);
+  assert.equal(repeated.run.id, (await svc.list()).runs[0].id);
+  assert.equal(attempts.resetAfterSuccess({ id: repeated.requestId }), true);
+  const next = await send();
+  assert.notEqual(next.run.id, repeated.run.id);
+  assert.equal((await db.prepare('SELECT COUNT(*) AS count FROM workbench_runs').bind().first()).count, 2);
 });

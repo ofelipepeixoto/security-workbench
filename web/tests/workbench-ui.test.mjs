@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import React from 'react';
@@ -19,7 +19,7 @@ try {
     const result = ts.transpileModule(source, {
       compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
       transformers: { after: [context => node => ts.visitNode(node, function visit(current) {
-        if (ts.isImportDeclaration(current) && ts.isStringLiteral(current.moduleSpecifier) && current.moduleSpecifier.text.startsWith('.')) {
+        if (ts.isImportDeclaration(current) && ts.isStringLiteral(current.moduleSpecifier) && current.moduleSpecifier.text.startsWith('.') && !current.moduleSpecifier.text.endsWith('.mjs')) {
           return ts.factory.updateImportDeclaration(current, current.modifiers, current.importClause, ts.factory.createStringLiteral(current.moduleSpecifier.text + '.mjs'), current.attributes);
         }
         return ts.visitEachChild(current, visit, context);
@@ -29,6 +29,8 @@ try {
     await mkdir(dirname(target), { recursive: true });
     await writeFile(target, result.outputText);
   }
+  await mkdir(join(output, 'lib'), { recursive: true });
+  await copyFile(join(webRoot, 'lib/rea-import-attempt.mjs'), join(output, 'lib/rea-import-attempt.mjs'));
   const components = await import(pathToFileURL(join(output, 'app/workbench.mjs')).href);
   Workbench = components.default; WorkbenchListState = components.WorkbenchListState; RunMetadata = components.RunMetadata; RunEvidenceDetails = components.RunEvidenceDetails;
 } finally {

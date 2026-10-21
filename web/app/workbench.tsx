@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Activity, ArrowLeft, ArrowRight, Check, CheckCircle2, ChevronRight, Download, FileCode2, FileText, FolderGit2, GitBranch, LayoutDashboard, LockKeyhole, Plus, RefreshCw, Search, Settings2, Shield, SlidersHorizontal, X, AlertCircle, Menu, User, CircleHelp, ListChecks } from "lucide-react";
 import { OperationalInfo } from "../components/operational-info";
+import { newReaImportAttemptTracker } from "../lib/rea-import-attempt.mjs";
 import { demoProject, demoRun, resetDemo, updateDemoRuns, useDemoHydrated, useDemoRuns } from "../components/demo-workbench";
 import type { Comparison, Filters, Finding, FindingsResult, HistoricalFinding, Project, Run, WorkbenchView } from "../components/workbench-types";
 
@@ -89,6 +90,8 @@ export default function Workbench({ signedIn, name, githubReady = false, csrfTok
   const [linkedRuns, setLinkedRuns] = useState<Run[]>([]);
   const [report, setReport] = useState<{ filename: string; markdown: string } | null>(null);
   const [reaFile, setReaFile] = useState<File | null>(null), [reaConfirmed, setReaConfirmed] = useState(false);
+  const reaAttempts = useRef(newReaImportAttemptTracker());
+  const reaSubmitting = useRef(false);
   const listUnavailable = listFailed || sessionLost;
   const projects = demo ? [demoProject] : sessionLost ? [] : realProjects;
   const runs = demo ? demoRuns : sessionLost ? emptyRuns : realRuns;
@@ -111,7 +114,7 @@ export default function Workbench({ signedIn, name, githubReady = false, csrfTok
   const handleFailure = useCallback((cause: unknown) => {
     if (cause instanceof Error && cause.name === "AbortError") return;
     setError(cause instanceof Error ? cause.message : "Não foi possível concluir. Tente novamente.");
-    if (cause instanceof ApiError && [401, 403].includes(cause.status)) { setSessionLost(true); setProjects([]); setRuns([]); setSelected(null); setAggregate(null); setReport(null); }
+    if (cause instanceof ApiError && [401, 403].includes(cause.status)) { reaAttempts.current.invalidate(); setSessionLost(true); setProjects([]); setRuns([]); setSelected(null); setAggregate(null); setReport(null); }
   }, []);
   useEffect(() => {
     const onPageShow = (event: PageTransitionEvent) => { if (event.persisted) window.location.reload(); };
@@ -153,27 +156,36 @@ export default function Workbench({ signedIn, name, githubReady = false, csrfTok
   }, [demo, signedIn, sessionLost, loading, listFailed, initialView, initialFilters.before, initialFilters.after, runs, linkedRuns, csrfToken, handleFailure]);
 
   function refresh() { setLoading(true); setListFailed(false); setError(""); setAggregateError(""); setRefreshKey(value => value + 1); }
-  function openProject() { setError(""); setIdentity(null); setRepo(""); setConfirmed(false); setModal("project"); }
-  function openScan(id?: string) { if (!projects.length) { openProject(); return; } setError(""); setProjectId(id || projects[0].id); setRevision(""); setAdvanced(false); setModal("scan"); }
+  function openProject() { reaAttempts.current.invalidate(); setError(""); setIdentity(null); setRepo(""); setConfirmed(false); setModal("project"); }
+  function openScan(id?: string) { reaAttempts.current.invalidate(); if (!projects.length) { openProject(); return; } setError(""); setProjectId(id || projects[0].id); setRevision(""); setAdvanced(false); setModal("scan"); }
   function showDemo() {
     resetDemo();
     // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- Explicitly enter the fictitious mode with a full reload.
     window.location.assign("/dashboard?demo=1");
   }
-  function openRea() { setError(""); setProjectId(projects[0]?.id || ""); setRevision(""); setReaFile(null); setReaConfirmed(false); setModal("rea"); }
+  function openRea() { reaAttempts.current.invalidate(); setError(""); setProjectId(projects[0]?.id || ""); setRevision(""); setReaFile(null); setReaConfirmed(false); setModal("rea"); }
   async function importRea(event: FormEvent) {
     event.preventDefault();
-    if (demo || !signedIn || !reaConfirmed || !reaFile) return;
+    if (busy || reaSubmitting.current || demo || !signedIn || sessionLost || !reaConfirmed || !reaFile) return;
     if (reaFile.size > 1024 * 1024) { setError("O JSON deve ter no máximo 1 MiB. Reduza o artefato localmente antes de importar."); return; }
+    const contextVersion = reaAttempts.current.captureContext();
+    reaSubmitting.current = true;
     setBusy(true); setError("");
     try {
-      let evidence: string;
-      try { evidence = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(await reaFile.arrayBuffer()); }
-      catch { throw new Error("O JSON precisa usar UTF-8 válido. Confira o arquivo localmente antes de importar."); }
-      const result = await api<{ run: Run }>({ projectId, revision, requestId: crypto.randomUUID(), evidence }, csrfToken, undefined, "/api/workbench/rea");
+      let evidence: string, bytes: ArrayBuffer;
+      try {
+        bytes = await reaFile.arrayBuffer();
+        evidence = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
+      } catch { throw new Error("O JSON precisa usar UTF-8 válido. Confira o arquivo localmente antes de importar."); }
+      const digest = await crypto.subtle.digest("SHA-256", bytes);
+      const reportDigest = [...new Uint8Array(digest)].map(value => value.toString(16).padStart(2, "0")).join("");
+      const requestId = reaAttempts.current.resolve({ projectId, commitSha: revision, reportDigest, contextVersion });
+      if (!requestId) { setError("A seleção mudou. Confira projeto, commit e arquivo antes de importar novamente."); return; }
+      const result = await api<{ run: Run }>({ projectId, revision, requestId, evidence }, csrfToken, undefined, "/api/workbench/rea");
+      reaAttempts.current.resetAfterSuccess({ id: requestId });
       go("/runs/" + encodeURIComponent(result.run.id));
     } catch (cause) { handleFailure(cause); setNotice("Confira o histórico antes de repetir a importação."); }
-    finally { setBusy(false); }
+    finally { reaSubmitting.current = false; setBusy(false); }
   }
   async function inspectRepo(event: FormEvent) { event.preventDefault(); setBusy(true); setError(""); try { setIdentity(demo ? { repo: demoProject.repo, id: 100, branch: "main" } : (await api<{ repository: { repo: string; id: number; branch: string } }>({ action: "inspect", repo }, csrfToken)).repository); setConfirmed(false); } catch (cause) { handleFailure(cause); } finally { setBusy(false); } }
   async function authorize() { if (!identity || !confirmed) return; setBusy(true); setError(""); try { if (demo) { setNotice("Projeto fictício conferido. Nenhuma autorização real foi registrada."); setModal(null); } else { await api({ action: "authorize", repo: identity.repo, repositoryId: identity.id, confirmed: true }, csrfToken); go("/projects"); } } catch (cause) { handleFailure(cause); } finally { setBusy(false); } }
@@ -193,7 +205,7 @@ export default function Workbench({ signedIn, name, githubReady = false, csrfTok
     event.preventDefault(); setBusy(true); setError(""); setComparison(null);
     try { const left = comparableRuns.find(run => run.id === before), right = comparableRuns.find(run => run.id === after); if (!left || !right || left.id === right.id || left.project_id !== right.project_id || (left.source || "github-public") !== (right.source || "github-public")) throw new Error("Escolha duas análises concluídas diferentes do mesmo projeto e método."); const result = demo ? (() => { const old = new Set(left.findings?.map(item => item.fingerprint)), current = new Set(right.findings?.map(item => item.fingerprint)); return { new: [...current].filter(item => !old.has(item)), no_longer_detected: [...old].filter(item => !current.has(item)), still_detected: [...current].filter(item => old.has(item)), partial: left.partial || right.partial }; })() : (await api<{ comparison: Comparison }>({ action: "compare", before, after }, csrfToken)).comparison; setComparison(result); window.history.replaceState(null, "", href("/compare", { before, after })); } catch (cause) { handleFailure(cause); } finally { setBusy(false); }
   }
-  const close = () => { if (!busy) setModal(null); };
+  const close = () => { if (!busy) { reaAttempts.current.invalidate(); setModal(null); } };
   const currentNav = initialView === "detail" ? "runs" : initialView;
   const currentLabel = initialView === "detail" ? "Revisão da análise" : initialView === "onboarding" ? "Primeiros passos" : navigation.find(item => item.id === currentNav)?.label || "Workbench";
   const reportRun = demo ? demoRuns.find(run => run.id === filters.run) : null;
@@ -220,7 +232,7 @@ export default function Workbench({ signedIn, name, githubReady = false, csrfTok
       </main>
     </div>
     {modal === "project" && <Modal title={identity ? "Confirme o escopo" : "Adicionar projeto"} onClose={close} busy={busy}>{error && <ErrorBox message={error} />}<p className="modal-description">{demo ? "Este fluxo usa sempre o mesmo repositório fictício. Nenhum link informado é consultado." : "Adicione um repositório público seu. A identidade será conferida antes do cadastro."}</p>{!identity ? <form onSubmit={inspectRepo}><label className="field">Link ou nome do repositório<input autoFocus required maxLength={250} value={repo} onChange={event => setRepo(event.target.value)} placeholder="https://github.com/ofelipepeixoto/rea" disabled={busy} /><small>Somente repositórios públicos de ofelipepeixoto nesta versão.</small></label><div className="modal-actions"><button className="button secondary" type="button" disabled={busy} onClick={close}>Cancelar</button><button className="button primary" disabled={busy || sessionLost}>{busy ? "Conferindo…" : "Conferir repositório"}<ArrowRight size={16} /></button></div></form> : <><div className="identity-card"><FolderGit2 size={28} /><div><strong>{identity.repo}</strong><p>Público · branch {identity.branch}</p><small>ID estável {identity.id}</small></div></div><label className="checkbox"><input type="checkbox" checked={confirmed} disabled={busy} onChange={event => setConfirmed(event.target.checked)} /><span>Tenho autorização para analisar este repositório e confirmo a identidade acima. Autorizo somente leitura estática.</span></label><div className="modal-actions"><button className="button secondary" disabled={busy} onClick={() => setIdentity(null)}>Voltar</button><button className="button primary" disabled={busy || !confirmed || sessionLost} onClick={() => void authorize()}>{busy ? "Salvando…" : demo ? "Concluir exemplo" : "Autorizar e adicionar"}<Check size={16} /></button></div></>}</Modal>}
-    {modal === "rea" && <Modal title="Importar análise estática REA (local)" onClose={close} busy={busy}>{error && <ErrorBox message={error} />}{demo ? <><p className="modal-description">A importação exige a sessão do proprietário e um projeto real autorizado. A demonstração não envia arquivos nem simula execução do REA.</p><button className="button secondary" onClick={close}>Voltar ao exemplo</button></> : <><p className="modal-description">Importe um JSON produzido localmente e conferido pelo operador. A hospedagem não executa o REA ou o código do alvo. O arquivo bruto não é persistido; os candidatos normalizados seguem para revisão humana.</p>{!projects.length ? <p className="notice">Cadastre um projeto autorizado antes de importar um artefato.</p> : <form onSubmit={importRea}><label className="field">Projeto autorizado<select required value={projectId} disabled={busy} onChange={event => { setProjectId(event.target.value); setReaConfirmed(false); }}>{projects.map(project => <option key={project.id} value={project.id}>{project.repo}</option>)}</select></label><label className="field">Commit declarado<input required pattern="[0-9a-fA-F]{40}" maxLength={40} disabled={busy} value={revision} onChange={event => { setRevision(event.target.value); setReaConfirmed(false); }} placeholder="SHA completo de 40 caracteres" /><small>O vínculo do artefato com esse commit não será verificado pela aquisição GitHub.</small></label><label className="field">Artefato JSON local<input type="file" required accept="application/json,.json" disabled={busy} onChange={event => { setReaFile(event.target.files?.[0] || null); setReaConfirmed(false); }} /><small>Máximo de 1 MiB. Não envie arquivos com credenciais ou conteúdo sensível bruto.</small></label><label className="checkbox"><input type="checkbox" required disabled={busy} checked={reaConfirmed} onChange={event => setReaConfirmed(event.target.checked)} /><span>Conferi a origem e o conteúdo do JSON, tenho autorização para esse projeto e declaro o commit informado. Entendo que a importação é parcial e não verifica esse vínculo.</span></label><div className="modal-actions"><button type="button" className="button secondary" onClick={close} disabled={busy}>Cancelar</button><button className="button primary" disabled={busy || !reaConfirmed || !reaFile || sessionLost}>{busy ? "Importando…" : "Importar para revisão"}</button></div></form>}</>}</Modal>}
+    {modal === "rea" && <Modal title="Importar análise estática REA (local)" onClose={close} busy={busy}>{error && <ErrorBox message={error} />}{demo ? <><p className="modal-description">A importação exige a sessão do proprietário e um projeto real autorizado. A demonstração não envia arquivos nem simula execução do REA.</p><button className="button secondary" onClick={close}>Voltar ao exemplo</button></> : <><p className="modal-description">Importe um JSON produzido localmente e conferido pelo operador. A hospedagem não executa o REA ou o código do alvo. O arquivo bruto não é persistido; os candidatos normalizados seguem para revisão humana.</p>{!projects.length ? <p className="notice">Cadastre um projeto autorizado antes de importar um artefato.</p> : <form onSubmit={importRea}><label className="field">Projeto autorizado<select required value={projectId} disabled={busy} onChange={event => { reaAttempts.current.invalidate(); setProjectId(event.target.value); setReaConfirmed(false); }}>{projects.map(project => <option key={project.id} value={project.id}>{project.repo}</option>)}</select></label><label className="field">Commit declarado<input required pattern="[0-9a-fA-F]{40}" maxLength={40} disabled={busy} value={revision} onChange={event => { reaAttempts.current.invalidate(); setRevision(event.target.value); setReaConfirmed(false); }} placeholder="SHA completo de 40 caracteres" /><small>O vínculo do artefato com esse commit não será verificado pela aquisição GitHub.</small></label><label className="field">Artefato JSON local<input type="file" required accept="application/json,.json" disabled={busy} onChange={event => { reaAttempts.current.invalidate(); setReaFile(event.target.files?.[0] || null); setReaConfirmed(false); }} /><small>Máximo de 1 MiB. Não envie arquivos com credenciais ou conteúdo sensível bruto.</small></label><label className="checkbox"><input type="checkbox" required disabled={busy} checked={reaConfirmed} onChange={event => setReaConfirmed(event.target.checked)} /><span>Conferi a origem e o conteúdo do JSON, tenho autorização para esse projeto e declaro o commit informado. Entendo que a importação é parcial e não verifica esse vínculo.</span></label><div className="modal-actions"><button type="button" className="button secondary" onClick={close} disabled={busy}>Cancelar</button><button className="button primary" disabled={busy || !reaConfirmed || !reaFile || sessionLost}>{busy ? "Importando…" : "Importar para revisão"}</button></div></form>}</>}</Modal>}
     {modal === "scan" && <Modal title={demo ? "Nova análise fictícia" : "Nova análise"} onClose={close} busy={busy}>{error && <ErrorBox message={error} />}<p className="modal-description">{demo ? "O exemplo repete a fixture, sem rede e sem analisar um repositório." : "Escolha um projeto autorizado. A versão atual é fixada em um commit antes da leitura."}</p><form onSubmit={scan}><label className="field">Projeto<select required disabled={busy} value={projectId} onChange={event => setProjectId(event.target.value)}>{projects.map(project => <option key={project.id} value={project.id}>{project.repo}</option>)}</select></label><div className="version-choice"><GitBranch size={20} /><div><strong>{advanced ? "Commit específico" : "Versão atual do projeto"}</strong><p>{advanced ? "Use o SHA completo para repetir uma análise." : "O commit efetivo ficará registrado no resultado."}</p></div></div><label className="checkbox compact"><input type="checkbox" checked={advanced} disabled={busy} onChange={event => setAdvanced(event.target.checked)} /><span>Quero escolher um commit específico</span></label>{advanced && <label className="field">SHA do commit<input required disabled={busy} pattern="[0-9a-fA-F]{40}" maxLength={40} value={revision} onChange={event => setRevision(event.target.value)} placeholder="40 caracteres hexadecimais" /></label>}<div className="scope-note"><Shield size={18} /><p>Até 20 arquivos suportados. Sem execução do alvo. Possíveis credenciais são redigidas.</p></div>{busy && <div className="notice" role="status"><span className="spinner" /><span>Solicitação em andamento. Aguarde e confira o histórico se a conexão falhar.</span></div>}<div className="modal-actions"><button className="button secondary" type="button" disabled={busy} onClick={close}>Cancelar</button><button className="button primary" disabled={busy || sessionLost}>{busy ? "Analisando…" : demo ? "Criar análise fictícia" : "Iniciar análise"}<ArrowRight size={16} /></button></div></form></Modal>}
   </div>;
 }

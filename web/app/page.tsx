@@ -1,8 +1,7 @@
-import { env } from "cloudflare:workers";
 import Workbench from "./workbench";
-import { getChatGPTUser } from "./chatgpt-auth";
+import { getWorkbenchAccess } from "./workbench-identity";
 export const dynamic = "force-dynamic";
 export default async function Home() {
-  const user = await getChatGPTUser();
-  return <Workbench signedIn={Boolean(user && env.WORKBENCH_OWNER_ID && user.userId === env.WORKBENCH_OWNER_ID)} name={user?.fullName || "Radar"} />;
+  const access = await getWorkbenchAccess();
+  return <Workbench signedIn={Boolean(access.user)} name={access.user?.displayName || "Visitante"} githubReady={access.githubReady} csrfToken={access.user?.csrfToken || ""} />;
 }

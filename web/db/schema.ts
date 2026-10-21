@@ -37,3 +37,24 @@ export const reviews = sqliteTable("workbench_reviews", {
   decision: text("decision", { enum: ["candidate", "confirmed", "false_positive", "accepted_risk"] }).notNull(),
   updatedAt: text("updated_at").notNull(),
 }, (table) => [uniqueIndex("workbench_review_owner_finding").on(table.ownerId, table.runId, table.fingerprint)]);
+
+// Login state is ephemeral; access/refresh tokens are never persisted.
+export const oauthFlows = sqliteTable("workbench_oauth_flows", {
+  stateHash: text("state_hash").primaryKey(),
+  browserHash: text("browser_hash").notNull(),
+  verifier: text("verifier").notNull(),
+  configKey: text("config_key").notNull(),
+  expiresAt: integer("expires_at").notNull(),
+  createdAt: integer("created_at").notNull(),
+}, (table) => [index("workbench_oauth_expiry").on(table.expiresAt)]);
+
+export const githubSessions = sqliteTable("workbench_github_sessions", {
+  tokenHash: text("token_hash").primaryKey(),
+  csrfHash: text("csrf_hash").notNull(),
+  githubId: text("github_id").notNull(),
+  ownerId: text("owner_id").notNull(),
+  displayName: text("display_name").notNull(),
+  configKey: text("config_key").notNull(),
+  expiresAt: integer("expires_at").notNull(),
+  createdAt: integer("created_at").notNull(),
+}, (table) => [index("workbench_github_session_expiry").on(table.expiresAt)]);

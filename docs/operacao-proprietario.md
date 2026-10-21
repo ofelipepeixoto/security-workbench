@@ -1,35 +1,55 @@
-# Operação individual na área pública
+# Operação individual — GitHub exclusivo
 
-Refs #14. A demonstração continua pública e fictícia. A operação real exige
-identidade ChatGPT **e** correspondência exata com `WORKBENCH_OWNER_ID`, configurado
-somente no servidor. Um usuário autenticado diferente recebe 403 antes de consultar
-D1 ou GitHub; ausência de configuração retorna 503. Sem identidade retorna 401.
-Os filtros por proprietário nas consultas continuam necessários.
+Refs #14, [PR #20](https://github.com/ofelipepeixoto/security-workbench/pull/20)
+e [PR #22 em rascunho](https://github.com/ofelipepeixoto/security-workbench/pull/22).
+A versão 12 do Site foi publicada em 21/10/2026 após autorização do proprietário;
+o [registro da publicação](publicacao-2026-10-21.md) reúne o artefato, os resultados
+observados e os limites. A demonstração continua pública e fictícia. A operação real exige
+sessão GitHub validada no servidor e correspondência ao owner configurado.
+Não há fallback por ChatGPT, e-mail, username ou cadastro inicial. O OAuth real
+ainda não foi homologado: `GITHUB_LOGIN_ENABLED` permanece `false`, o Client Secret
+está pendente. A revisão 2 preservou como segredo a chave do owner legado, conforme
+a reconciliação administrativa documentada no registro da publicação.
 
-## Preparação e publicação (pendentes de revisão humana)
+## Configuração e homologação pendentes
 
-1. Conferir a identidade do proprietário numa sessão legítima deste mesmo Site.
-   Sites fornece um ID estável por Site; ele **não é** o ID da conta do painel Sites,
-   um e-mail, o login GitHub ou o ID de outro Site. Não inferir esses equivalentes.
-2. Configurar `WORKBENCH_OWNER_ID` com esse ID no gerenciador de variáveis de runtime
-   do Site, sem colocar o valor em fonte, chat, logs ou manifesto. Se usar histórico
-   D1 para reconciliar a identidade, confirmar a origem e a conta antes de vincular;
-   não eleger automaticamente o primeiro cadastro como proprietário.
-3. Publicar apenas após revisão, com a variável preparada na mesma entrega.
-   A fonte Sites é separada do GitHub: portar a mudança revisada, verificar testes,
-   TypeScript/build e registrar o commit e a versão realmente publicados.
-4. Validar proprietário, outro usuário autenticado e anônimo; testar GET e ações
-   de revisão/relatório. Confirmar persistência do histórico existente.
+1. Ler o [guia de autenticação](autenticacao-github.md), incluindo variáveis,
+   callback exato, migração D1, limites, retenção e reversão.
+2. Preservar o `WORKBENCH_OWNER_ID` já reconciliado com os dados existentes deste
+   Site e confirmar o histórico após o login. Esse ID não é o ID da conta do painel Sites, e-mail,
+   username GitHub ou ID de outro Site. Ele é preservado como chave dos dados,
+   sem tornar a identidade nativa um segundo método de entrada.
+3. A OAuth App dedicada já foi criada e a identidade GitHub do proprietário foi
+   verificada. Gerar/configurar o Client Secret somente por mecanismo protegido,
+   preservando `GITHUB_OWNER_ID` e a vinculação ao `WORKBENCH_OWNER_ID` existente.
+   Nunca eleger automaticamente o primeiro login como administrador nem copiar
+   segredos para fonte/chat/log. Manter a flag desabilitada até conferir configuração
+   e identidade.
+4. No fluxo real, confirmar encaminhamento de cookies, callback sem sessão ChatGPT
+   prévia e migração correta. A fonte Sites é separada do GitHub; novas publicações
+   devem registrar a fonte e a versão efetivamente publicadas.
+5. Homologar GitHub proprietário, outra conta, anônimo, expiração e logout;
+   concluir revisão persistida, comparação e download reais do issue #14.
 
-O link "Entrar como proprietário" abre a autenticação oficial em navegação de topo.
-Ele não concede autorização por si só. Usuários sem autorização veem a demonstração.
-Não existem cadastro público, migração de dados ou credenciais novas neste PR.
+Conta GitHub não autorizada é recusada no callback e não recebe sessão operacional.
+Sem sessão aceita, a API responde 401. O gate adicional do serviço preserva
+503 quando owner não está configurado e 403 para identidade diferente antes de
+ler projetos. A resolução de sessão pode consultar somente as tabelas de autenticação.
+Consultas de projetos/análises continuam filtradas pelo owner canônico.
 
 ## Validação e reversão
 
-`node --test web/tests/*.test.mjs` cobre recusa de outro usuário em todas as ações,
-configuração ausente, tentativa de fornecer proprietário no corpo e acesso legítimo.
-Executar também Python, TypeScript e build. Estes testes não substituem a homologação
-hospedada após publicação. Antes de publicar, a reversão é fechar o PR. Após publicar,
-priorizar corrigir a variável ou suspender somente a operação real, mantendo a demo;
-não remover o bloqueio de autorização para recuperar disponibilidade.
+Os testes Node incluem OAuth com respostas simuladas, SQLite em memória,
+seleção exclusiva de identidade, isolamento, revogação e dados existentes.
+Os testes locais aplicáveis e a
+[CI do PR #22](https://github.com/ofelipepeixoto/security-workbench/actions/runs/39666451867)
+passaram. Esses resultados não equivalem à homologação hospedada do login GitHub;
+os resultados de produção estão delimitados no registro da publicação.
+
+Para suspender a operação real, preferir nova revisão publicada com a flag
+desabilitada, preservando a demonstração, o schema aditivo e o histórico. A flag
+é um bloqueio temporário: não revoga de forma durável sessões já emitidas após sua
+reativação. Quando for necessária revogação durável, usar o controle explícito de
+revogação. Não remover o gate de proprietário nem reintroduzir outro provedor.
+Retornar à versão 10 exige decisão explícita do proprietário, pois ela usa o
+acesso ChatGPT anterior e não atende à orientação de GitHub exclusivo.

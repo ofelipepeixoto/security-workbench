@@ -6,7 +6,7 @@ Plataforma experimental em construção para inspecionar ativos **autorizados**.
 
 [Abra a demonstração pública](https://security-workbench.camaleaoweb3.com.br/) sem login. Ela usa **apenas dados fictícios no navegador**: explore projetos, análise, revisão, relatório e comparação sem gravar no servidor ou analisar um repositório real.
 
-Para a operação real, o proprietário acessa a área autenticada com ChatGPT. O Site exige identidade no servidor antes de ler ou modificar projetos, análises e relatórios. Nesta versão hospedada, somente repositórios **públicos** de `ofelipepeixoto` podem ser cadastrados após confirmação de escopo. A aquisição fixa o commit, confere identidade e hashes e lê até 20 arquivos suportados; lacunas aparecem como cobertura parcial. Não há auditoria completa de CVEs nem execução de código do alvo. A leitura pública da API GitHub está sujeita à cota compartilhada por IP.
+O [Site publicado v12](docs/publicacao-2026-10-21.md) contém a nova interface e exige exclusivamente GitHub na operação real. A chave do proprietário legado foi preservada na configuração do servidor; a flag de login permanece desabilitada até configurar o Client Secret e iniciar homologação. A demonstração está disponível. Veja o [guia de configuração](docs/autenticacao-github.md). O Site exige identidade no servidor antes de ler ou modificar projetos, análises e relatórios. Nesta versão hospedada, somente repositórios **públicos** de `ofelipepeixoto` podem ser cadastrados após confirmação de escopo. A aquisição fixa o commit, confere identidade e hashes e lê até 20 arquivos suportados; lacunas aparecem como cobertura parcial. Não há auditoria completa de CVEs nem execução de código do alvo. A leitura pública da API GitHub está sujeita à cota compartilhada por IP.
 
 O Site público é distinto desta interface Python local e do banco SQLite: a área hospedada usa D1 isolado. [Estado da publicação e verificações](docs/sistema-web-privado.md). A visibilidade do repositório e a audiência do Site são independentes. Não inserir segredos ou dados sensíveis na demonstração.
 
@@ -66,3 +66,7 @@ O [smoke do PR #10](https://github.com/ofelipepeixoto/security-workbench/actions
 ## Comunidade e licença
 
 O código autoral está sob [licença MIT](LICENSE); avisos de terceiros são preservados no diretório `web/`. Veja [a origem do adaptador e do starter](web/PROVENANCE.md), o [guia de contribuição](CONTRIBUTING.md) e a [política de segurança](SECURITY.md). Esta versão é experimental: reporte falhas do próprio Workbench por canal privado e não divulgue dados de alvos em issues.
+
+## Evolução em revisão — 21/10/2026
+
+A [auditoria observada](docs/auditoria-2026-10-21.md), o [inventário das 15 telas e matriz](docs/referencia-funcional-e-ux.md), o [guia de login GitHub do proprietário](docs/autenticacao-github.md) e o [estudo REA](docs/rea-estudo-2026-10-21.md) distinguem código testado localmente de homologação e publicação. OAuth e UX foram publicados no Site v12 com login desabilitado por configuração incompleta. Login não instala a futura App de repositórios.

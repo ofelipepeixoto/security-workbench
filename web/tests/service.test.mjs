@@ -52,12 +52,37 @@ async function authorize(service) {
 }
 
 function dependencies(db, options = {}) {
-  return { getUser: async () => ({ userId: 'owner-a' }), getDb: () => db, scanner: scanner(), ...options };
+  return { authorizedOwnerId: 'owner-a', getUser: async () => ({ userId: 'owner-a' }), getDb: () => db, scanner: scanner(), ...options };
 }
 
 function request(payload, headers = {}) {
   return new Request('https://workbench.example/api/workbench', { method: 'POST', headers: { Origin: 'https://workbench.example', 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(payload) });
 }
+
+test('only the configured Site owner reaches any real API operation', async () => {
+  let touched = false;
+  const deps = dependencies(null, {
+    getUser: async () => ({ userId: 'another-signed-in-user' }),
+    getDb() { touched = true; throw new Error('database must stay untouched'); },
+  });
+  const requests = [new Request('https://workbench.example/api/workbench'),
+    ...['inspect', 'authorize', 'scan', 'run', 'review', 'compare', 'report'].map(action =>
+      request({ action, ownerId: 'owner-a', authorizedOwnerId: 'another-signed-in-user' }))];
+  for (const req of requests) {
+    const result = await handleWorkbenchRequest(req, deps);
+    assert.equal(result.status, 403);
+    assert.equal(result.headers.get('cache-control'), 'no-store');
+  }
+  for (const authorizedOwnerId of [undefined, '', '   ', null]) {
+    const result = await handleWorkbenchRequest(new Request('https://workbench.example/api/workbench'),
+      { ...deps, authorizedOwnerId, getUser: async () => ({ userId: 'owner-a' }) });
+    assert.equal(result.status, 503);
+  }
+  assert.equal(touched, false);
+  const db = database();
+  assert.equal((await handleWorkbenchRequest(new Request('https://workbench.example/api/workbench'), dependencies(db))).status, 200);
+  db.close();
+});
 
 test('authentication and request guards run before database or acquisition', async () => {
   let accessed = false;
@@ -131,7 +156,7 @@ test('a second authenticated owner cannot read, review, report, scan, or compare
   assert.notEqual(ownProject.id, project.id);
   const { run: ownRun } = await second.act({ action: 'scan', projectId: ownProject.id, requestId: REQUEST });
   assert.notEqual(ownRun.id, run.id);
-  const http = await handleWorkbenchRequest(request({ action: 'run', runId: run.id, ownerId: 'owner-a' }), dependencies(db, { getUser: async () => ({ userId: 'owner-b' }) }));
+  const http = await handleWorkbenchRequest(request({ action: 'run', runId: run.id, ownerId: 'owner-a' }), dependencies(db, { authorizedOwnerId: 'owner-b', getUser: async () => ({ userId: 'owner-b' }) }));
   assert.equal(http.status, 404);
   db.close();
 });

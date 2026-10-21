@@ -110,6 +110,8 @@ function fixture(t, githubUser = { id: 101, login: 'fixture-owner' }) {
   }
   async function api(sessionCookie, payload) {
     const incoming = request('/api/workbench', sessionCookie, payload);
+    const session = await auth.getSession(incoming);
+    if (payload && session) incoming.headers.set('X-Workbench-CSRF', session.csrfToken);
     return handleWorkbenchRequest(incoming, {
       getUser: () => auth.getSession(incoming), getDb: () => db,
       authorizedOwnerId: OWNER, scanner, now: () => NOW,

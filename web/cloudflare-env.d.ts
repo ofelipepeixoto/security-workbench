@@ -7,6 +7,7 @@ declare namespace Cloudflare {
     GITHUB_LOGIN_CLIENT_ID?: string;
     GITHUB_LOGIN_CLIENT_SECRET?: string;
     GITHUB_OWNER_ID?: string;
+    GITHUB_SESSION_VERSION?: string;
     BUCKET?: R2Bucket;
   }
 }

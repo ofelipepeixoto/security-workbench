@@ -35,15 +35,15 @@ function fixture(options = {}) {
   };
   const now = () => new Date(time);
   const auth = createGitHubAuth({ config: { ...config, ...options.config }, db, fetcher, now });
-  return { db, calls, auth, now, advance(seconds) { time += seconds * 1000; } };
+  return { db, calls, auth, now, fetcher, advance(seconds) { time += seconds * 1000; } };
 }
 const request = (path, cookie, options = {}) => new Request(`${ORIGIN}${path}`, { ...options, headers: { ...(cookie ? { Cookie: cookie } : {}), ...options.headers } });
 function cookieValue(response, name) {
   const value = response.headers.getSetCookie().find(item => item.startsWith(`${name}=`));
   return value?.split(';')[0] ?? null;
 }
-async function start(f) {
-  const result = await f.auth.start(request('/api/auth/github/start'));
+async function start(f, cookies) {
+  const result = await f.auth.start(request('/api/auth/github/start', cookies));
   assert.equal(result.status, 302);
   const location = new URL(result.headers.get('location'));
   return { result, state: location.searchParams.get('state'), cookie: cookieValue(result, FLOW), location };
@@ -59,8 +59,10 @@ function faultingStorage(db, fault) {
     return {
       async first() { if (fault.read) throw new Error('storage'); return bound.first(); },
       async run() {
-        if (fault.write === 'throw') throw new Error('storage');
-        if (fault.write === 'result') return { success: false };
+        if (!fault.writeWhen || fault.writeWhen(query)) {
+          if (fault.write === 'throw') throw new Error('storage');
+          if (fault.write === 'result') return { success: false };
+        }
         return bound.run();
       },
     };
@@ -246,6 +248,80 @@ test('session expiry, owner config changes, tampered and duplicate cookies revok
   f.db.close();
 });
 
+test('session version defaults to 1 and rotation blocks old sessions and pending callbacks', async () => {
+  const f = fixture(), signed = await signIn(f), begin = await start(f);
+  const explicit = createGitHubAuth({ config: { ...config, sessionVersion: '1' }, db: f.db, fetcher: f.fetcher, now: f.now });
+  assert.ok(await explicit.getSession(request('/', signed.sessionCookie)));
+  const rotated = createGitHubAuth({ config: { ...config, sessionVersion: '2' }, db: f.db, fetcher: f.fetcher, now: f.now });
+  assert.equal(await rotated.getSession(request('/', signed.sessionCookie)), null);
+  const callsBefore = f.calls.length;
+  const rejected = await rotated.callback(request(`/api/auth/github/callback?state=${begin.state}&code=inert_code`, begin.cookie));
+  assert.equal(rejected.headers.get('location'), '/access?auth=invalid');
+  assert.equal(f.calls.length, callsBefore);
+  // Rotating config does not physically delete old rows. Reusing an old version
+  // would revive unexpired sessions, so the operator must never roll it back.
+  assert.ok(await explicit.getSession(request('/', signed.sessionCookie)));
+  const logout = await rotated.logout(request('/api/auth/github/logout', signed.sessionCookie, { method: 'POST', headers: { Origin: ORIGIN } }));
+  assert.equal(logout.status, 401);
+  assert.equal(await explicit.getSession(request('/', signed.sessionCookie)), null);
+  assert.equal(await rotated.getSession(request('/', signed.sessionCookie)), null);
+  const renewed = await signIn({ ...f, auth: rotated });
+  assert.equal(renewed.result.headers.get('location'), '/');
+  assert.equal((await rotated.getSession(request('/', renewed.sessionCookie))).userId, config.workbenchOwnerId);
+  assert.equal(await explicit.getSession(request('/', renewed.sessionCookie)), null);
+  f.db.close();
+});
+
+test('invalid session versions fail closed without touching storage or provider', async () => {
+  let touched = false;
+  for (const sessionVersion of ['', '0', '01', '-1', '1.0', ' 1', '1 ', '1000000000000', 1, null]) {
+    const settings = { ...config, sessionVersion };
+    assert.equal(isGitHubLoginConfigured(settings), false);
+    const auth = createGitHubAuth({ config: settings, db: { prepare() { touched = true; throw new Error('storage'); } }, fetcher() { touched = true; throw new Error('provider'); } });
+    assert.equal((await auth.start(request('/api/auth/github/start'))).status, 503);
+    assert.equal(await auth.getSession(request('/', `${SESSION}=${'x'.repeat(43)}`)), null);
+  }
+  assert.equal(touched, false);
+});
+
+test('failed storage cleanup or flow insertion never claims a login start succeeded', async () => {
+  for (const prefix of ['DELETE FROM workbench_oauth_flows WHERE expires_at', 'DELETE FROM workbench_github_sessions WHERE expires_at', 'UPDATE workbench_oauth_flows SET', 'INSERT INTO workbench_oauth_flows']) {
+    const f = fixture();
+    const auth = createGitHubAuth({ config, db: faultingStorage(f.db, { write: 'result', writeWhen: query => query.startsWith(prefix) }), fetcher: f.fetcher, now: f.now });
+    const result = await auth.start(request('/api/auth/github/start'));
+    assert.equal(result.status, 503);
+    assert.equal(result.headers.get('set-cookie'), null);
+    assert.equal(f.calls.length, 0);
+    assert.equal(f.db.sql.prepare('SELECT count(*) AS n FROM workbench_oauth_flows').get().n, 0);
+    f.db.close();
+  }
+});
+
+test('failed state consumption or session insertion never issues an authentication cookie', async () => {
+  for (const prefix of ['DELETE FROM workbench_oauth_flows WHERE state_hash', 'INSERT INTO workbench_github_sessions']) {
+    const f = fixture(), begin = await start(f);
+    const auth = createGitHubAuth({ config, db: faultingStorage(f.db, { write: 'result', writeWhen: query => query.startsWith(prefix) }), fetcher: f.fetcher, now: f.now });
+    const result = await auth.callback(request(`/api/auth/github/callback?state=${begin.state}&code=inert_code`, begin.cookie));
+    assert.equal(result.headers.get('location'), '/access?auth=unavailable');
+    assert.equal(cookieValue(result, SESSION), null);
+    assert.equal(f.calls.length, prefix.startsWith('DELETE') ? 0 : 2);
+    assert.equal(f.db.sql.prepare('SELECT count(*) AS n FROM workbench_github_sessions').get().n, 0);
+    f.db.close();
+  }
+});
+
+test('session-version revocation still fails closed when storage deletion fails', async () => {
+  const f = fixture(), signed = await signIn(f);
+  for (const fault of [{ read: true }, { write: 'throw' }, { write: 'result' }]) {
+    const auth = createGitHubAuth({ config: { ...config, sessionVersion: '2' }, db: faultingStorage(f.db, fault), now: f.now });
+    const result = await auth.logout(request('/api/auth/github/logout', signed.sessionCookie, { method: 'POST', headers: { Origin: ORIGIN } }));
+    assert.equal(result.status, 503);
+    assert.equal(result.headers.get('set-cookie'), null);
+    assert.ok(await f.auth.getSession(request('/', signed.sessionCookie)));
+  }
+  f.db.close();
+});
+
 test('logout requires exact Origin, POST and session-bound CSRF; successful logout revokes the cookie', async () => {
   const f = fixture(), signed = await signIn(f);
   const session = await f.auth.getSession(request('/', signed.sessionCookie));
@@ -345,14 +421,95 @@ test('a forged cookie is cleared only after storage confirms and accepts its rev
   f.db.close();
 });
 
-test('flow admission is finite and expired records can be replaced without runtime schema creation', async () => {
+test('restarting with the same flow cookie replaces its orphan without reusing state or PKCE', async () => {
+  const f = fixture(), begin = await start(f);
+  const oldVerifier = f.db.sql.prepare('SELECT verifier FROM workbench_oauth_flows').get().verifier;
+  f.advance(120);
+  const restarted = await start(f, begin.cookie);
+  assert.equal(restarted.cookie, begin.cookie);
+  assert.notEqual(restarted.state, begin.state);
+  const row = f.db.sql.prepare('SELECT * FROM workbench_oauth_flows').get();
+  assert.notEqual(row.verifier, oldVerifier);
+  assert.equal(row.state_hash, await hash(restarted.state));
+  assert.equal(row.expires_at - Math.floor(f.now().valueOf() / 1000), 600);
+  assert.equal(f.db.sql.prepare('SELECT count(*) AS n FROM workbench_oauth_flows').get().n, 1);
+  assert.equal((await f.auth.callback(request(`/api/auth/github/callback?state=${begin.state}&code=inert_code`, begin.cookie))).headers.get('location'), '/access?auth=invalid');
+  assert.equal(f.calls.length, 0);
+  assert.equal((await f.auth.callback(request(`/api/auth/github/callback?state=${restarted.state}&code=inert_code`, restarted.cookie))).headers.get('location'), '/');
+  f.db.close();
+});
+
+test('concurrent starts cannot leave two pending flows for the same cookie', async () => {
+  const f = fixture(), begin = await start(f);
+  const results = await Promise.all([f.auth.start(request('/api/auth/github/start', begin.cookie)), f.auth.start(request('/api/auth/github/start', begin.cookie))]);
+  assert.ok(results.some(result => result.status === 302));
+  assert.ok(results.every(result => [302, 429].includes(result.status)));
+  assert.equal(f.db.sql.prepare('SELECT count(*) AS n FROM workbench_oauth_flows').get().n, 1);
+  const callbacks = await Promise.all(results.filter(result => result.status === 302).map(result => {
+    const state = new URL(result.headers.get('location')).searchParams.get('state');
+    return f.auth.callback(request(`/api/auth/github/callback?state=${state}&code=inert_code`, begin.cookie));
+  }));
+  assert.equal(callbacks.filter(result => result.headers.get('location') === '/').length, 1);
+  assert.equal(f.calls.length, 2);
+  f.db.close();
+});
+
+test('a cookie can replace only its own flow when the global pool is full', async () => {
+  const f = fixture(), begin = await start(f);
+  for (let i = 0; i < 19; i++) await start(f);
+  const restarted = await start(f, begin.cookie);
+  assert.notEqual(restarted.state, begin.state);
+  assert.equal(f.db.sql.prepare('SELECT count(*) AS n FROM workbench_oauth_flows').get().n, 20);
+  const freshCookie = `${FLOW}=${'x'.repeat(43)}`;
+  assert.equal((await f.auth.start(request('/api/auth/github/start', freshCookie))).status, 429);
+  assert.equal(f.db.sql.prepare('SELECT count(*) AS n FROM workbench_oauth_flows').get().n, 20);
+  assert.equal(f.calls.length, 0);
+  f.db.close();
+});
+
+test('restarting a full-pool flow never releases its slot to an interleaved anonymous start', async () => {
+  const f = fixture(), begin = await start(f);
+  for (let i = 0; i < 19; i++) await start(f);
+  const browserHash = await hash(begin.cookie.split('=')[1]);
+  let injected = false, outsider;
+  const db = { prepare(query) { return { bind(...values) {
+    const bound = f.db.prepare(query).bind(...values);
+    return { first: () => bound.first(), async run() {
+      const result = await bound.run();
+      // Insert a competing request immediately after the first mutation that
+      // touches this browser's existing flow, before its caller can proceed.
+      if (!injected && query.includes('workbench_oauth_flows') && values.includes(browserHash)) {
+        injected = true;
+        outsider = await f.auth.start(request('/api/auth/github/start'));
+      }
+      return result;
+    } };
+  } }; } };
+  const auth = createGitHubAuth({ config, db, fetcher: f.fetcher, now: f.now });
+  const restarted = await auth.start(request('/api/auth/github/start', begin.cookie));
+  assert.equal(injected, true);
+  assert.equal(outsider.status, 429);
+  assert.equal(restarted.status, 302);
+  assert.equal(f.db.sql.prepare('SELECT count(*) AS n FROM workbench_oauth_flows').get().n, 20);
+  const state = new URL(restarted.headers.get('location')).searchParams.get('state');
+  assert.equal((await auth.callback(request(`/api/auth/github/callback?state=${state}&code=inert_code`, begin.cookie))).headers.get('location'), '/');
+  f.db.close();
+});
+
+test('new anonymous cookie resets can still exhaust the bounded global pool; TTL recovers capacity', async () => {
   const f = fixture();
   for (let i = 0; i < 20; i++) await start(f);
-  assert.equal((await f.auth.start(request('/api/auth/github/start'))).status, 429);
+  const limited = await f.auth.start(request('/api/auth/github/start', null, { headers: { 'CF-Connecting-IP': '192.0.2.1', 'X-Forwarded-For': '198.51.100.1' } }));
+  assert.equal(limited.status, 429);
+  assert.equal(limited.headers.get('retry-after'), '600');
+  assert.equal(limited.headers.get('cache-control'), 'no-store');
   assert.equal(f.db.sql.prepare('SELECT count(*) AS n FROM workbench_oauth_flows').get().n, 20);
-  f.advance(601);
+  f.advance(120);
+  assert.equal((await f.auth.start(request('/api/auth/github/start'))).headers.get('retry-after'), '480');
+  f.advance(481);
   await start(f);
   assert.equal(f.db.sql.prepare('SELECT count(*) AS n FROM workbench_oauth_flows').get().n, 1);
+  assert.equal(f.calls.length, 0);
   f.db.close();
 });
 

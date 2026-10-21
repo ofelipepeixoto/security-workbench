@@ -211,10 +211,12 @@ export function createWorkbenchService({ db, ownerId, scanner = defaultScanner, 
   };
 }
 
-export async function handleWorkbenchRequest(request, { getUser, getDb, scanner = defaultScanner, now = () => new Date(), uuid = () => crypto.randomUUID() }) {
+export async function handleWorkbenchRequest(request, { getUser, getDb, authorizedOwnerId, scanner = defaultScanner, now = () => new Date(), uuid = () => crypto.randomUUID() }) {
   try {
     const user = await getUser();
     if (!user?.userId) throw new WorkbenchError('Entre para acessar o Workbench.', 401);
+    if (typeof authorizedOwnerId !== 'string' || !authorizedOwnerId.trim()) throw new WorkbenchError('Operação real indisponível: configuração do proprietário pendente.', 503);
+    if (user.userId !== authorizedOwnerId) throw new WorkbenchError('Operação real restrita ao proprietário.', 403);
     if (request.method !== 'GET' && request.method !== 'POST') throw new WorkbenchError('Método não permitido.', 405);
     const payload = request.method === 'POST' ? await parseBody(request) : null;
     const service = createWorkbenchService({ db: await getDb(), ownerId: user.userId, scanner, now, uuid });

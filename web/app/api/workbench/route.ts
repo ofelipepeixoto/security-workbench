@@ -4,6 +4,7 @@ import { handleWorkbenchRequest } from "../../../lib/workbench-service.mjs";
 
 const dependencies = {
   getUser: getChatGPTUser,
+  get authorizedOwnerId() { return env.WORKBENCH_OWNER_ID; },
   getDb: () => env.DB,
 };
 

@@ -11,6 +11,7 @@ export function githubConfig() {
     clientSecret: env.GITHUB_LOGIN_CLIENT_SECRET || "",
     githubOwnerId: env.GITHUB_OWNER_ID || "",
     workbenchOwnerId: env.WORKBENCH_OWNER_ID || "",
+    sessionVersion: env.GITHUB_SESSION_VERSION || "1",
   };
 }
 

@@ -6,6 +6,7 @@ const FLOW_COOKIE = '__Host-workbench_github_flow';
 const SESSION_COOKIE = '__Host-workbench_github_session';
 const SECRET = /^[A-Za-z0-9_-]{43}$/;
 const FLOW_SECONDS = 600;
+const MAX_PENDING_FLOWS = 20;
 const SESSION_SECONDS = 43200;
 const RESPONSE_HEADERS = { 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', 'X-Content-Type-Options': 'nosniff' };
 const encoder = new TextEncoder();
@@ -55,7 +56,9 @@ function configuration(input) {
     const githubOwnerId = String(input.githubOwnerId);
     if (!/^[1-9][0-9]*$/.test(githubOwnerId) || !Number.isSafeInteger(Number(githubOwnerId))) return null;
     if (typeof input.workbenchOwnerId !== 'string' || !input.workbenchOwnerId || input.workbenchOwnerId.trim() !== input.workbenchOwnerId || input.workbenchOwnerId.length > 200) return null;
-    return { ...input, origin, githubOwnerId };
+    const sessionVersion = input.sessionVersion === undefined ? '1' : input.sessionVersion;
+    if (typeof sessionVersion !== 'string' || !/^[1-9][0-9]{0,11}$/.test(sessionVersion)) return null;
+    return { ...input, origin, githubOwnerId, sessionVersion };
   } catch { return null; }
 }
 
@@ -111,9 +114,13 @@ export function createGitHubAuth({ config, db, fetcher = fetch, now = () => new 
   const settings = configuration(config);
   const timestamp = () => Math.floor(new Date(now()).valueOf() / 1000);
   const usable = request => settings && new URL(request.url).origin === settings.origin && db?.prepare;
-  const key = () => digest(JSON.stringify([settings.origin, settings.clientId, settings.githubOwnerId, settings.workbenchOwnerId]));
+  const key = () => digest(JSON.stringify([settings.origin, settings.clientId, settings.githubOwnerId, settings.workbenchOwnerId, settings.sessionVersion]));
   const first = (sql, ...values) => db.prepare(sql).bind(...values).first();
-  const write = (sql, ...values) => db.prepare(sql).bind(...values).run();
+  const write = async (sql, ...values) => {
+    const result = await db.prepare(sql).bind(...values).run();
+    if (result?.success !== true) throw new Error('storage');
+    return result;
+  };
   const invalidCallback = status => redirect(`/access?auth=${status}`, 303, [cookie(FLOW_COOKIE, '', 0)]);
 
   async function getSession(request) {
@@ -136,11 +143,23 @@ export function createGitHubAuth({ config, db, fetcher = fetch, now = () => new 
       if (request.method !== 'GET') return reply({ error: 'Método não permitido.' }, 405);
       try {
         const current = timestamp();
-        const state = randomSecret(), binding = randomSecret(), verifier = randomSecret();
+        const state = randomSecret(), binding = readCookie(request, FLOW_COOKIE) || randomSecret(), verifier = randomSecret();
+        const browserHash = await digest(binding), stateHash = await digest(state), configKey = await key();
         await write('DELETE FROM workbench_oauth_flows WHERE expires_at <= ?', current);
         await write('DELETE FROM workbench_github_sessions WHERE expires_at <= ?', current);
-        const inserted = await write('INSERT INTO workbench_oauth_flows (state_hash, browser_hash, verifier, config_key, expires_at, created_at) SELECT ?, ?, ?, ?, ?, ? WHERE (SELECT count(*) FROM workbench_oauth_flows WHERE expires_at > ?) < 20', await digest(state), await digest(binding), verifier, await key(), current + FLOW_SECONDS, current, current);
-        if (inserted.meta?.changes !== 1) return reply({ error: 'Muitas tentativas de login. Tente novamente mais tarde.' }, 429);
+        // Replace in place so a concurrent anonymous start cannot take this
+        // cookie's existing slot between deletion and insertion. This prevents
+        // orphaned retries, not anonymous cookie resets.
+        const refreshed = await write('UPDATE workbench_oauth_flows SET state_hash = ?, verifier = ?, config_key = ?, expires_at = ?, created_at = ? WHERE browser_hash = ?', stateHash, verifier, configKey, current + FLOW_SECONDS, current, browserHash);
+        if (![0, 1].includes(refreshed.meta?.changes)) throw new Error('storage');
+        const admitted = refreshed.meta.changes === 1 ? refreshed : await write('INSERT INTO workbench_oauth_flows (state_hash, browser_hash, verifier, config_key, expires_at, created_at) SELECT ?, ?, ?, ?, ?, ? WHERE (SELECT count(*) FROM workbench_oauth_flows WHERE expires_at > ?) < ? AND NOT EXISTS (SELECT 1 FROM workbench_oauth_flows WHERE browser_hash = ?)', stateHash, browserHash, verifier, configKey, current + FLOW_SECONDS, current, current, MAX_PENDING_FLOWS, browserHash);
+        if (admitted.meta?.changes !== 1) {
+          const next = await first('SELECT MIN(expires_at) AS expires_at FROM workbench_oauth_flows WHERE expires_at > ?', current);
+          const retry = Number.isSafeInteger(next?.expires_at) ? Math.max(1, Math.min(FLOW_SECONDS, next.expires_at - current)) : FLOW_SECONDS;
+          const limited = reply({ error: 'Muitas tentativas de login. Tente novamente mais tarde.' }, 429);
+          limited.headers.set('Retry-After', String(retry));
+          return limited;
+        }
         const url = new URL(AUTHORIZE_URL);
         url.search = new URLSearchParams({ client_id: settings.clientId, redirect_uri: `${settings.origin}/api/auth/github/callback`, state, code_challenge: await digest(verifier), code_challenge_method: 'S256', scope: '', allow_signup: 'false', prompt: 'select_account' }).toString();
         return redirect(url.toString(), 302, [cookie(FLOW_COOKIE, binding, FLOW_SECONDS)]);
@@ -207,8 +226,7 @@ export function createGitHubAuth({ config, db, fetcher = fetch, now = () => new 
         }
         // Expired/disabled/config-mismatched sessions are revoked too, so turning
         // login back on cannot revive an old browser cookie after sign-out.
-        const removed = await write('DELETE FROM workbench_github_sessions WHERE token_hash = ?', tokenHash);
-        if (removed?.success !== true) throw new Error('storage');
+        await write('DELETE FROM workbench_github_sessions WHERE token_hash = ?', tokenHash);
         return active ? reply({ ok: true }, 200, clear) : reply({ error: 'Sessão expirada.' }, 401, clear);
       } catch { return reply({ error: 'Não foi possível encerrar a sessão. Tente novamente.' }, 503); }
     },

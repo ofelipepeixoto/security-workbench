@@ -80,9 +80,9 @@ do serviço inferido apenas pelo término do cliente; não habilitar rede ou rel
 | Item | Estado | Evidência | Bloqueio | Próxima ação | Responsável | Aceite |
 | --- | --- | --- | --- | --- | --- | --- |
 | Compilação completa | Falhou em duas execuções registradas | OOM e timeout acima; cinco sentinelas ausentes/vazias | Limites atingidos; fase exata desconhecida | Usar fases separadas com registro próprio | Engenharia + proprietário | Nenhuma falha tratada como runtime pronto |
-| Emissão sem typecheck e bundle | Implementados; resultado no WSL pendente | Script e testes de contrato deste PR | Execução local necessária | Executar helper fixado e conferir estado final | Proprietário com apoio da engenharia | Duas fases aprovadas, artefatos e lockfile conferidos |
+| Emissão sem typecheck e bundle | Concluídos segundo retorno do operador | Helper fixado/hash conferido; emit status 0 em 4 s, bundle status 0 em 2 s e cinco hashes registrados abaixo | Nenhum bloqueio desse preparo; typecheck e análise são separados | Preservar runtime e seguir para a fixture própria | Proprietário com apoio da engenharia | Marcador final observado; fonte e lockfile verificados pelo helper antes e depois |
 | Typecheck completo do REA | Pendente | Modo `--noCheck` declarado | Compilação completa não passou | Investigar custo e validar tipos separadamente | Engenharia | Checagem do commit fixado aprovada, sem esconder a exceção |
-| Primeira análise REA | Não executada | Apenas preparo e pré-flight até aqui | Runtime e executor de análise ainda sem aceite | Primeiro fixture própria inerte, depois fixture estática controlada | Engenharia + proprietário | Evidence nativo, isolamento, limites, horários e projeção verificados |
+| Primeira análise REA | Fixture inerte concluída segundo retorno posterior do operador | [Resultado nativo](rea-fixture-inerte-2026-10-21.md): 7 s, uma fonte/342 bytes, zero falhas e unidade encerrada | Importação e typecheck completo continuam separados | Preservar o runtime e importar a saída existente na plataforma | Engenharia + proprietário | Não repetir preparo; observação estrutural não vira vulnerabilidade e cobertura semântica permanece unknown |
 
 Reversão: não usar o novo runtime; manter o diretório de tentativa e a cópia
 preservada de `dist` para inspeção local. Nenhuma fonte, dependência, configuração
@@ -102,3 +102,29 @@ dois documentos. A revisão independente não identificou bloqueio crítico/alto
 Os testes não chamam systemd, Bubblewrap, compilador ou REA; não comprovam a execução
 no WSL. Nenhuma dependência ou arquivo do aplicativo web mudou, portanto build web
 e TypeScript web não foram repetidos para este incremento de shell/documentação.
+
+## Resultado posterior do operador — runtime preparado
+
+Em 21/10/2026, o operador forneceu checksum aprovado do helper no commit
+`556976855559aefc8fb1c5556d6ccc87359375ef` (SHA-256
+`82b8135d251053ff81912f305975ad4a7ab4cdd8c1de550bc830ff063c3130a3`),
+emissão com status zero em 4 segundos e bundle com status zero em 2 segundos.
+O marcador `RUNTIME_PREPARADO_SEM_TYPECHECK` foi observado. Os tempos são os
+segundos decorridos informados pelo helper, não CPU ou pico de memória medidos.
+A conclusão do helper implica os checks de fonte/lockfile e cgroups de cada fase
+previstos naquela versão; não é prova dos limites da futura análise.
+
+| Sentinela | SHA-256 fornecido pelo operador |
+| --- | --- |
+| `dist/generatedPackageMetadata.js` | `1469cc34329436e5b1b9c6a9d655f8120d59e6bdcb5b843e7bc0ccff9aff7eaa` |
+| `dist/cli-runtime/cli.js` | `4d1a3f41a808135bf7580a431912bbf95703768ad129a33523402d3758ce7500` |
+| `dist/cli-runtime/cliOutput.js` | `aac5314e8632c2f1b450d1e4f460b028ebc55b695d67c14fd0c3f2cdb486abab` |
+| `dist/cli-runtime/cliResultOutput.js` | `52ac8c14f31e9e13697dd9308d782965eee607ded69838a8fd2f297ac0870038` |
+| `dist/composition/javascriptAnalysisWorkerProcess.js` | `dce09f9721a5e82db8a39dd0f48bafc374b743108dc74ceedbc651851209c052` |
+
+`typecheck_complete=false` e `ready_for_rea=false` permanecem esperados. O novo
+[teste de fixture inerte](rea-fixture-inerte-2026-10-21.md) é um passo separado,
+cujo resultado posterior do operador concluiu uma análise de 342 bytes em sete
+segundos, com zero falhas e unidade encerrada. Essa execução possui registro
+próprio no documento da fixture; não foi inferida a partir do build. Importação,
+typecheck completo e prontidão para alvos arbitrários continuam pendentes.

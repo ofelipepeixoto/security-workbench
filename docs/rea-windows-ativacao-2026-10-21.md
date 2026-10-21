@@ -7,9 +7,12 @@ Este helper testa somente arquivos e conexões de loopback criados por ele. Não
 O Bubblewrap privado 0.13.1 foi compilado e passou nos 12 controles do pré-flight,
 segundo os retornos do operador. As 409 dependências do REA estão instaladas com
 lockfile íntegro. A compilação completa falhou em duas execuções registradas
-(OOM e timeout); a análise do motor ainda não ocorreu.
+(OOM e timeout). Depois, a emissão sem typecheck terminou em 4 s e o bundle em 2 s,
+com status zero e cinco hashes conferidos pelo helper, segundo o operador.
+A análise do motor ainda não ocorreu.
 
-O próximo procedimento é a [preparação limitada do runtime](rea-runtime-preparacao-2026-10-21.md).
+O preparo está registrado na [preparação limitada do runtime](rea-runtime-preparacao-2026-10-21.md).
+O próximo procedimento é o [teste da fixture própria inerte](rea-fixture-inerte-2026-10-21.md).
 As seções posteriores preservam a trajetória e os comandos das etapas anteriores;
 essas etapas não precisam ser repetidas. `memory_enforced`/`ready_for_rea` do helper
 continuam false por contrato, mesmo com os limites externos daquela unidade
@@ -74,7 +77,7 @@ A compilação completa falhou por limites de recursos, conforme registro abaixo
 
 O operador tentou o comando `npm run compile` na unidade isolada de 2 GiB, swap zero, 128 tarefas, quota de uma CPU e prazo de 600 segundos. O journal fornecido contém dois eventos separados: uma execução terminou em `oom-kill`, após 3 min 9,762 s e pico de 2 GiB; outra atingiu `timeout`, após 10 min 0,755 s e pico de 2 GiB. Os registros não identificam qual subprocesso provocou cada consumo. Nenhum dos cinco arquivos sentinela finais estava presente e não vazio. O diff rastreado permaneceu vazio e o lockfile manteve o hash fixado. A compilação não foi concluída; não repetir automaticamente o mesmo comando ou ampliar seus limites.
 
-A retomada está no [procedimento de emissão e empacotamento separados](rea-runtime-preparacao-2026-10-21.md), implementado em `scripts/rea-prepare-runtime.sh`. Ele mantém o compilador fixado, a configuração do projeto e o bundler original, mas usa `--noCheck` para gerar JavaScript sem a verificação completa de tipos. O resultado dessa alternativa no WSL ainda é desconhecido. A verificação completa de tipos do motor permanece pendente; os testes TypeScript do aplicativo web são outro gate.
+A retomada está no [procedimento de emissão e empacotamento separados](rea-runtime-preparacao-2026-10-21.md), implementado em `scripts/rea-prepare-runtime.sh`. Ele mantém o compilador fixado, a configuração do projeto e o bundler original, mas usa `--noCheck` para gerar JavaScript sem a verificação completa de tipos. O retorno posterior do operador confirmou emissão e bundle com status zero; os cinco hashes estão no documento de preparação. A verificação completa de tipos do motor permanece pendente; os testes TypeScript do aplicativo web são outro gate.
 
 Esse preparo compila somente a ferramenta confiável. Não recebe, importa ou executa JavaScript do alvo e não homologa o engine. Não publicar `dist`, dependências ou logs locais.
 

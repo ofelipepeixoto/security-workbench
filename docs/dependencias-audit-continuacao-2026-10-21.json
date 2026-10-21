@@ -1,0 +1,98 @@
+{
+  "observed_at": "2026-10-21T20:39:29.127604+00:00",
+  "source": "pnpm 11.25.0 audit --json; npm registry advisory response",
+  "base_commit_tree": "4e5dbd9211ec7dfc250cdb2819aa0f93292ca871",
+  "scope": "Continuation dependency source, not yet publication proof or target vulnerability audit",
+  "lockfile_sha256": "8449ddd502e9380316fcda678d4d1dc52c7fd31e29384f3c3dd21c8adf6d5032",
+  "before": {
+    "entries": 57,
+    "distinct_advisories": 51,
+    "packages": 13,
+    "metadata": {
+      "info": 0,
+      "low": 8,
+      "moderate": 22,
+      "high": 27,
+      "critical": 0
+    }
+  },
+  "entries": 3,
+  "distinct_advisories": 3,
+  "packages": 2,
+  "metadata": {
+    "info": 0,
+    "low": 1,
+    "moderate": 1,
+    "high": 1,
+    "critical": 0
+  },
+  "advisories": [
+    {
+      "module_name": "braces",
+      "github_advisory_id": "GHSA-vfj7-8cjw-p6xm",
+      "severity": "high",
+      "vulnerable_versions": "<=3.0.3",
+      "patched_versions": null,
+      "patched_versions_unpublished": true,
+      "url": "https://github.com/advisories/GHSA-vfj7-8cjw-p6xm",
+      "findings": [
+        {
+          "version": "3.0.3",
+          "dev": true,
+          "optional": false,
+          "bundled": false,
+          "paths": [
+            ".>eslint-config-next>@next/eslint-plugin-next>fast-glob>micromatch>braces",
+            ".>vinext>vite-plugin-commonjs>vite-plugin-dynamic-import>fast-glob>micromatch>braces"
+          ],
+          "paths_total": 2
+        }
+      ]
+    },
+    {
+      "module_name": "esbuild",
+      "github_advisory_id": "GHSA-67mh-4wv8-2f99",
+      "severity": "moderate",
+      "vulnerable_versions": "<=0.24.2",
+      "patched_versions": ">=0.25.0",
+      "patched_versions_unpublished": null,
+      "url": "https://github.com/advisories/GHSA-67mh-4wv8-2f99",
+      "findings": [
+        {
+          "version": "0.18.20",
+          "dev": true,
+          "optional": false,
+          "bundled": false,
+          "paths": [
+            ".>drizzle-kit>@esbuild-kit/esm-loader>@esbuild-kit/core-utils>esbuild"
+          ],
+          "paths_total": 1
+        }
+      ]
+    },
+    {
+      "module_name": "esbuild",
+      "github_advisory_id": "GHSA-g7r4-m6w7-qqqr",
+      "severity": "low",
+      "vulnerable_versions": ">=0.27.3 <0.28.1",
+      "patched_versions": ">=0.28.1",
+      "patched_versions_unpublished": null,
+      "url": "https://github.com/advisories/GHSA-g7r4-m6w7-qqqr",
+      "findings": [
+        {
+          "version": "0.27.3",
+          "dev": true,
+          "optional": false,
+          "bundled": false,
+          "paths": [
+            ".>@cloudflare/vite-plugin>wrangler>esbuild",
+            ".>wrangler>esbuild"
+          ],
+          "paths_total": 2
+        }
+      ]
+    }
+  ],
+  "path_limit_per_finding": 5,
+  "coverage_limit": "The npm advisory response did not list the additional undici security advisories published by its maintainer on 2026-10-15; see the companion triage document."
+}

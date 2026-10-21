@@ -7,6 +7,9 @@ https://security-workbench.camaleaoweb3.com.br/. O fluxo oferecido pela aplicaç
 desabilitado por configuração.** Publicação de código não equivale à conclusão
 da autenticação ou da homologação operacional.
 
+O [relatório consolidado de pendências](pendencias-2026-10-21.md) reúne os próximos
+gates, os responsáveis pela retomada e os critérios de aceite, incluindo o REA.
+
 ## Artefato publicado
 
 | Item | Estado confirmado |

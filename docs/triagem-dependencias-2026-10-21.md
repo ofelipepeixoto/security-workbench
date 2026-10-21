@@ -3,6 +3,20 @@
 Refs #13. Base: `main` `cf906efd01c832632f96eafac6555d55f4e39ff9`.
 Nenhum alerta foi descartado; correspondência de versão não prova exploração.
 
+**Atualização de publicação:** os PRs #18/#19 foram combinados e publicados no
+Site **v12**, com React/DOM/RSC 19.2.8, sharp 0.35.5 e source-map-js 1.2.2.
+O texto do primeiro PR e o snapshot npm abaixo preservam o momento anterior ao
+patch RSC; não representam a fonte hospedada final. Veja o
+[registro de publicação](publicacao-2026-10-21.md) e o
+[relatório de pendências](pendencias-2026-10-21.md). Não foi feito merge em `main`.
+
+Uma consulta adicional do lockfile final, correspondente à fonte Sites v12,
+concluiu em 21/10 às 20:14 UTC: **57 entradas, 51 GHSAs e 13 pacotes** (27 altas,
+22 moderadas, 8 baixas, zero críticas). O
+[snapshot pós-publicação](dependencias-audit-pos-publicacao-2026-10-21.json) conserva
+caminhos, versões e limites de projeção. O renderer RSC já não aparece nesse
+inventário. A contagem GitHub não foi reprocessada/comprovada após a publicação.
+
 ## Duas fontes, contagens diferentes
 
 O painel autenticado do GitHub mostrou **38 alertas abertos: 16 altos, 15 moderados,

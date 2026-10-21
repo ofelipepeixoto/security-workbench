@@ -2,7 +2,10 @@
 
 Estado em 17/10/2026: o núcleo local usa Python/SQLite; a área hospedada usa Workers/D1 e recebe apenas repositórios públicos do namespace autorizado. A demonstração pública é fictícia. Os itens abaixo são **propostas**, não funcionalidades implantadas. A [validação pública do smoke](validacao-transporte.md) cobre a aquisição no Actions, não a hospedagem.
 
-## Revisão em 21/10/2026 — ainda sem publicação
+## Revisão em 21/10/2026 — código publicado, homologação pendente
+
+O [relatório consolidado de pendências](pendencias-2026-10-21.md) registra os gates,
+bloqueios, riscos e critérios de aceite após a publicação v12/revisão 2.
 
 A [auditoria e matriz de UX](referencia-funcional-e-ux.md) separa capacidades observadas de propostas. A implementação em revisão prepara [login GitHub do proprietário](autenticacao-github.md), com OAuth App dedicada e associação explícita ao owner existente, exclusivo por GitHub, preservando a chave do owner e o gate do PR #17. OAuth não equivale à instalação da futura App de repositórios. O [Site v12 foi publicado](publicacao-2026-10-21.md) com OAuth App cadastrada e correções #18/#19. O owner legado foi preservado na configuração do servidor; Client Secret e prova dos cookies/callback no login real seguem pendentes, com a flag false.
 

@@ -22,5 +22,25 @@
       "cache": "no-store",
       "body": "{\"error\":\"Login GitHub indisponível. Confira a configuração do servidor.\"}"
     }
-  ]
+  ],
+  "after_owner_configuration": {
+    "at": "2026-10-21T20:09:05.455049+00:00",
+    "environment_revision": 2,
+    "checks": [
+      {
+        "path": "/api/workbench",
+        "method": "GET",
+        "status": 401,
+        "cache": "no-store",
+        "body": "{\"error\":\"Entre para acessar o Workbench.\"}"
+      },
+      {
+        "path": "/api/auth/github/start",
+        "method": "GET",
+        "status": 503,
+        "cache": "no-store",
+        "body": "{\"error\":\"Login GitHub indisponível. Confira a configuração do servidor.\"}"
+      }
+    ]
+  }
 }

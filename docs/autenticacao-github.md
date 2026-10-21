@@ -1,6 +1,6 @@
 # Login GitHub do proprietário — preparação para homologação
 
-Estado em 21/10/2026: código publicado no Site v12 após autorização, incluindo a fronteira do PR #17 e as correções #18/#19; PRs GitHub continuam sem merge. **Login GitHub real ainda não homologado e desabilitado.** OAuth App cadastrada; Client Secret e associação ao owner existente pendentes. Consulte o [registro da publicação](publicacao-2026-10-21.md).
+Estado em 21/10/2026: código publicado no **Site v12**, incluindo a fronteira do PR #17 e as correções #18/#19. A publicação inicial passou às 19:53:34 UTC, com fonte `236082902476a9c943629b1005a23b01682c7252` e revisão de ambiente 1. O redeploy da mesma versão com a **revisão 2 passou às 20:07:20 UTC**, deployment `appgdep_6ad91b6813f08191bf3a8e0491c0a2a1`. **Login GitHub real ainda não homologado; flag desabilitada.** A associação ao proprietário existente está configurada; falta o Client Secret no ambiente. Consulte o [registro da publicação](publicacao-2026-10-21.md).
 
 ## Escolha e limites
 
@@ -8,7 +8,7 @@ Uma OAuth App dedicada identifica a conta, com PKCE S256, sem escopos adicionais
 
 O ID GitHub autorizado é mapeado explicitamente para o `WORKBENCH_OWNER_ID` **existente deste Site**, mantendo o namespace dos projetos. Não há associação por e-mail, primeiro usuário administrador ou vínculo automático. O ID da conta no painel Sites não substitui o ID nativo por Site. Não criar novo owner para fazer desaparecer um erro de configuração.
 
-A área real desta branch aceita **somente GitHub**, conforme a orientação final do proprietário. Não há fallback ChatGPT; identidade nativa e seus cabeçalhos não concedem acesso operacional. O arquivo de integração nativa anterior permanece apenas como código legado sem chamada no fluxo de acesso. A audiência pública da demonstração não autoriza os dados reais; todas as operações de `/api/workbench` continuam passando pela autorização do servidor do PR #17. Python/SQLite local, conector GitHub da conversa e Workers/D1 hospedado têm credenciais e bancos separados.
+A área real publicada aceita **somente GitHub**, conforme a orientação final do proprietário. Não há fallback ChatGPT; identidade nativa e seus cabeçalhos não concedem acesso operacional. O arquivo de integração nativa anterior permanece apenas como código legado sem chamada no fluxo de acesso. A audiência pública da demonstração não autoriza os dados reais; todas as operações de `/api/workbench` continuam passando pela autorização do servidor do PR #17. Python/SQLite local, conector GitHub da conversa e Workers/D1 hospedado têm credenciais e bancos separados.
 
 Login **não instala uma GitHub App**. Para seleção de repositórios privados, a etapa futura deve usar uma App com Contents: read, instalação e repository ID conferidos no servidor, credencial curta e revogação testada. Nesta entrega, não há App de repositórios, organizações, privados, webhook ou monitoramento.
 
@@ -20,30 +20,38 @@ Login **não instala uma GitHub App**. Para seleção de repositórios privados,
 - `POST /api/auth/github/logout`: exige Origin exata e, para sessão ativa, CSRF vinculado à sessão. Revoga em D1 antes de limpar o cookie. Falha de banco responde 503; a interface não declara saída concluída. Depois recarrega `/access`. Uma sessão ChatGPT prévia não é consultada nem autoriza a área real.
 - Mensagens fixas para consentimento negado, callback inválido, provedor indisponível e conta sem permissão. Dados arbitrários da query não são refletidos. Sessão expirada não concede acesso; o painel pede acesso do proprietário novamente.
 
-D1 conserva hashes, IDs, timestamps e o verificador PKCE temporário, nunca tokens GitHub. Expiração é lógica; a limpeza física de registros expirados ocorre no próximo início de login, sem scheduler novo. Fluxos simultâneos têm teto global de 20 por 10 minutos: protege crescimento, mas pode bloquear temporariamente login por abuso anônimo. **Antes de habilitar**, avaliar limitação na borda no ambiente de homologação; não foi criada infraestrutura nesta entrega. Sem fallback ativo, indisponibilidade do GitHub impede novo acesso operacional; não ativar antes de revisar essa limitação.
+D1 conserva hashes, IDs, timestamps e o verificador PKCE temporário, nunca tokens GitHub. Expiração é lógica; a limpeza física de registros expirados ocorre no próximo início de login, sem scheduler novo. Fluxos simultâneos têm teto global de 20 por 10 minutos: protege crescimento, mas pode bloquear temporariamente login por abuso anônimo. Essa é uma limitação de disponibilidade conhecida para a homologação manual individual; não houve teste de exaustão em produção nem foi adicionada infraestrutura ou limitação por IP. Não prometer disponibilidade operacional com esse controle. Sem fallback ativo, indisponibilidade do GitHub impede novo acesso operacional.
 
-Revogar a autorização na conta GitHub impede novas trocas, mas não encerra imediatamente a sessão local já emitida: ela pode durar até 12h. Para bloqueio imediato, desabilitar login no servidor ou alterar a associação do proprietário; para sair desse navegador, usar logout. Não há endpoint remoto de revogação automática nem promessa de propagação instantânea. Backup D1 deve tratar registros de autenticação como sensíveis.
+Revogar a autorização na conta GitHub impede novas trocas, mas não encerra imediatamente a sessão local já emitida: ela pode durar até 12h. Desabilitar login no servidor suspende o acesso enquanto a flag estiver desligada; reativar a mesma configuração pode tornar válidas novamente as sessões ainda não expiradas. Para sair desse navegador, usar logout e conferir sua conclusão. Para revogação durável, invalidar explicitamente os registros de sessão no D1 correto antes de reativar; não basta alternar a flag ou alterar e depois restaurar a associação. Não há endpoint remoto de revogação automática nem promessa de propagação instantânea. Backup D1 deve tratar registros de autenticação como sensíveis.
 
-## Configuração restante — pelo proprietário, fora do chat
+## Preparação realizada
 
-Na preparação do PR #20, o conector retornou zero variáveis. Na publicação autorizada, a revisão 1 configurou origem, Client ID, GitHub ID e flag false. Client Secret e WORKBENCH_OWNER_ID permanecem ausentes; nenhum valor secreto foi incluído em código ou logs. O roteiro abaixo continua como critérios para ativação, sem afirmar que todos foram concluídos.
+- A publicação autorizada incorporou a base de autorização e as correções de dependências. A [CI do PR #22 passou](https://github.com/ofelipepeixoto/security-workbench/actions/runs/39666451867).
+- Foi cadastrada a [OAuth App dedicada 3952863](https://github.com/settings/applications/3952863), com homepage `https://security-workbench.camaleaoweb3.com.br` e callback `https://security-workbench.camaleaoweb3.com.br/api/auth/github/callback`. O ID GitHub do proprietário foi verificado como `171351708`.
+- A revisão 1 configurou origem, Client ID, GitHub ID e flag `false`. A revisão 2 acrescentou `WORKBENCH_OWNER_ID` como segredo, preservando o namespace do projeto REA legado, repository ID `1417322346`, autorizado em 17/10/2026. O valor interno do proprietário não é reproduzido neste guia.
+- O overview do D1 confirmou instaladas as tabelas `workbench_oauth_flows` e `workbench_github_sessions`, da migração aditiva `0001_strong_swarm.sql`. Não foram consultadas suas linhas; a existência das tabelas não comprova um fluxo autenticado.
+- A verificação HTTP às 20:09 UTC retornou 401 em `GET /api/workbench` e 503 em `GET /api/auth/github/start`, com `Cache-Control: no-store`. Esses resultados confirmam a recusa de acesso e o login indisponível observados nessa configuração, sem comprovar autenticação real.
 
-1. Revisar os PRs e combinar a base #17 com as correções #18/#19 antes de preparar um deploy autorizado. Ainda não fazer merge/publicação sem autorização específica.
-2. Em GitHub → Settings → Developer settings → OAuth Apps, cadastrar **uma App dedicada ao login**. Homepage: `https://security-workbench.camaleaoweb3.com.br`. Authorization callback URL: `https://security-workbench.camaleaoweb3.com.br/api/auth/github/callback`. Não pedir escopo `repo`, organizações ou escrita. Para homologação em outro domínio HTTPS, usar outra App/callback e outra configuração canônica; não usar HTTP do preview para login real.
-3. No gerenciador protegido de variáveis do ambiente destinado à homologação, configurar os nomes abaixo. Nunca colar Client Secret, tokens, códigos de callback ou cookies no chat, Git ou capturas. Confirmar o ID GitHub por fonte autenticada legítima e conferir `WORKBENCH_OWNER_ID` contra a identidade nativa já autorizada e seus dados existentes. Não exportar o banco para obtê-lo.
-
-| Nome | Valor esperado |
+| Nome | Estado observado na revisão 2 |
 | --- | --- |
-| `WORKBENCH_ORIGIN` | Origem HTTPS exata, sem barra final, caminho ou query |
-| `GITHUB_LOGIN_CLIENT_ID` | Client ID da App dedicada |
-| `GITHUB_LOGIN_CLIENT_SECRET` | Client Secret apenas no servidor |
-| `GITHUB_OWNER_ID` | ID numérico estável da conta proprietária verificada |
-| `WORKBENCH_OWNER_ID` | ID canônico existente do proprietário neste Site |
-| `GITHUB_LOGIN_ENABLED` | `false` durante preparação; `true` somente ao iniciar homologação autorizada |
+| `WORKBENCH_ORIGIN` | Configurado com a origem HTTPS canônica |
+| `GITHUB_LOGIN_CLIENT_ID` | Configurado para a OAuth App dedicada |
+| `GITHUB_LOGIN_CLIENT_SECRET` | **Ausente; próximo passo manual** |
+| `GITHUB_OWNER_ID` | Configurado e verificado |
+| `WORKBENCH_OWNER_ID` | Configurado como segredo; namespace existente preservado |
+| `GITHUB_LOGIN_ENABLED` | `false`; ativação ainda pendente |
 
-4. Confirmar que a hospedagem encaminha cookies `__Host-`, múltiplos Set-Cookie e as três rotas OAuth sem exigir sessão ChatGPT prévia. Sites oferece identidade ChatGPT nativa; a compatibilidade do provedor externo **precisa de prova hospedada**. Se a plataforma interceptar rotas/cookies ou exigir ChatGPT antes do fluxo, manter GitHub desabilitado e documentar o bloqueio. Não oferecer outro provedor nem contornar controles. Uma alternativa de hospedagem compatível dependerá de projeto e autorização próprios.
-5. Após autorização de deploy, o pipeline deve aplicar a migração aditiva `0001_strong_swarm.sql` no D1 **correto** usando o fluxo oficial de deploy do projeto. São duas tabelas de autenticação; a tabela de projetos não é reescrita. Backup/restore devem ser privados e aprovados. O teste SQLite em memória não equivale à migração de produção. Não apontar o Worker ao SQLite local nem executar SQL contra bancos de terceiros.
-6. Habilitar a flag somente quando configuração, associação, migração, dependências e tratamento de abuso estiverem revisados. O cadastro OAuth e a publicação do código com flag false foram executados; a ativação e a homologação real permanecem pendentes conforme o registro de publicação.
+## Próximo passo manual — Client Secret e homologação
+
+1. Abrir a [OAuth App já cadastrada](https://github.com/settings/applications/3952863). Conferir o callback HTTPS acima; não criar outra App para repetir a preparação.
+2. Usar o botão **Generate a new client secret**, observado nessa página. Manter o valor somente no fluxo protegido entre o GitHub e a configuração do servidor. Nunca enviá-lo no chat, Git, capturas ou logs.
+3. No mecanismo protegido de variáveis do ambiente deste Site, salvar somente `GITHUB_LOGIN_CLIENT_SECRET` **como segredo no servidor**. Preservar as demais variáveis, especialmente `WORKBENCH_OWNER_ID`, e manter `GITHUB_LOGIN_ENABLED=false`. Este guia não presume nomes de menus, telas ou botões do Sites que não foram observados.
+4. Conferir que o segredo está configurado sem exibir seu valor. No fluxo Sites observado, o **redeploy é obrigatório** para aplicar a nova revisão de ambiente: publicar a versão salva com essa revisão, usando o mesmo artefato aprovado, e registrar revisão, deployment e resultado. Salvar a variável sozinho não aplica a nova configuração. A publicação do código e a instalação das tabelas já ocorreram; não recriar o banco nem o namespace do proprietário.
+5. No chat, avisar apenas **“segredo configurado”**, sem enviar seu valor. Manter a flag `false` até retomar a homologação já autorizada.
+
+Na etapa seguinte, habilitar a flag pelo mecanismo disponível e, em navegador sem sessão ChatGPT, abrir `/access` para seguir o login GitHub. A hospedagem ainda precisa demonstrar o encaminhamento correto dos cookies `__Host-`, múltiplos Set-Cookie e rotas OAuth durante o fluxo real. Se a plataforma interceptar rotas/cookies, exigir ChatGPT antes do fluxo ou o login não retornar corretamente, desligar a flag e registrar o bloqueio observado. Não oferecer outro provedor nem contornar controles. Continuar o roteiro abaixo somente com o acesso GitHub efetivamente validado.
+
+O Client Secret, a ativação e o fluxo completo de login continuam pendentes. Configuração e testes simulados não devem ser descritos como homologação real. Para outro domínio de homologação, usar App/callback e configuração canônica próprios, sem HTTP de preview para login real.
 
 ## Roteiro de homologação real
 
@@ -56,7 +64,9 @@ Na preparação do PR #20, o conector retornou zero variáveis. Na publicação 
 
 ## Reversão
 
-Antes de produção, basta encerrar os PRs/preview; Site e dados existentes não foram alterados. Depois de um futuro deploy aprovado, desabilitar `GITHUB_LOGIN_ENABLED`, manter a operação real indisponível até retornar a um artefato aprovado com autorização do proprietário. Não reintroduzir ChatGPT como fallback automático; a mudança de provedor exige decisão explícita. Manter as tabelas aditivas evita apagar sessões/dados sem aprovação; após avaliação de retenção, eventual remoção exige procedimento próprio. Não reverter o gate de owner para recuperar acesso. Trocar Client Secret requer gerenciador seguro; alterar só o segredo não revoga sessões locais já emitidas.
+A versão 12 já está publicada, com revisão de ambiente 2. Para suspender a operação real, manter ou alterar `GITHUB_LOGIN_ENABLED=false` e aplicar a configuração no ambiente. Isso bloqueia o acesso temporariamente; não revoga de forma durável sessões emitidas antes da suspensão. Em caso de revogação, invalidar os registros de autenticação no D1 correto e conferir o resultado antes de reativar, preservando projetos, análises e revisões humanas. Se D1 estiver indisponível, manter a flag desligada até concluir essa verificação.
+
+Para reverter código, usar um artefato revisado que preserve o acesso exclusivo por GitHub e a demonstração fictícia. Não retornar automaticamente à versão 10 nem reintroduzir ChatGPT como fallback. Manter as tabelas aditivas e o histórico; não apagar dados ou alterar o owner para recuperar acesso. Trocar apenas o Client Secret não revoga sessões locais já emitidas. Não registrar valores de segredos ou conteúdo de sessões durante a reversão.
 
 ## Fontes oficiais consultadas em 21/10/2026
 

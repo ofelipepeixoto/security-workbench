@@ -13,8 +13,9 @@ da autenticação ou da homologação operacional.
 | --- | --- |
 | Versão 12 | Deploy `succeeded` em 21/10/2026, às 19:53:34 UTC / 16:53:34 BRT |
 | Fonte Sites | `236082902476a9c943629b1005a23b01682c7252` |
-| Deployment | `appgdep_6ad9182ceb0c8191b70ed6c779f1a763` |
-| Revisão do ambiente | `1` |
+| Deployment inicial | `appgdep_6ad9182ceb0c8191b70ed6c779f1a763` |
+| Republicação da mesma v12 | `appgdep_6ad91b6813f08191bf3a8e0491c0a2a1`, `succeeded` às 20:07:20 UTC / 17:07:20 BRT |
+| Revisão atual do ambiente | `2`, preservando fonte e audiência |
 | Audiência | Demonstração pública; operação real exige autenticação e autorização no servidor |
 | Versão 11 anterior | Publicada nesta sessão às 19:48 UTC / 16:48 BRT; substituída pela versão 12 |
 | GitHub | Não houve merge dos PRs #17–#21; `main` e a release permanecem independentes desta publicação do Site |
@@ -32,7 +33,9 @@ documentada separadamente.
 ## Verificação efetivamente realizada
 
 - Passaram **56 testes Node**, **17 testes Python**, a checagem TypeScript, o lint
-  do código novo e o build no ambiente de validação. A CI do PR #20 foi aprovada.
+  do código novo e o build no ambiente de validação. As CIs dos PRs #20 e
+  [#22](https://github.com/ofelipepeixoto/security-workbench/actions/runs/39666451867)
+  foram aprovadas.
   Os testes com respostas simuladas do provedor não são autenticação GitHub real.
 - A interface pública foi inspecionada também com largura mobile de **390 px**.
   Isso não representa teste com usuários, auditoria completa de acessibilidade
@@ -43,6 +46,8 @@ documentada separadamente.
 - Nas mesmas condições, **GET `/api/auth/github/start` retornou 503** com o login
   desabilitado. A página de acesso mostrou a configuração pendente, sem simular
   sucesso nem oferecer outro provedor.
+- Após aplicar a revisão 2, às 20:09:05 UTC / 17:09:05 BRT, a recusa anônima
+  permaneceu: GET `/api/workbench` 401 e início OAuth 503, ambos `no-store`.
 - O REA **não foi executado** nesta publicação. Não houve teste intrusivo contra
   plataforma externa, integração permanente do REA ou ampliação para repositórios
   privados, organizações, bancos ou monitoramento automático.
@@ -52,15 +57,27 @@ documentada separadamente.
 Foi criado o aplicativo OAuth dedicado no GitHub e configurado o callback
 `https://security-workbench.camaleaoweb3.com.br/api/auth/github/callback`.
 A identidade GitHub do proprietário foi verificada. **Ainda não foi gerado um
-Client Secret nem confirmada a vinculação ao `WORKBENCH_OWNER_ID` existente deste
-Site.** `GITHUB_LOGIN_ENABLED` permanece `false`.
+Client Secret.** `GITHUB_LOGIN_ENABLED` permanece `false`.
 
-O menor passo seguro é gerar/configurar o Client Secret por meio protegido e
-confirmar o identificador canônico já associado aos dados do proprietário neste
-Site. Não publicar valores no chat, fonte, frontend ou logs. Não usar primeiro
-cadastro, e-mail, username ou ID de outra plataforma para eleger um novo
-proprietário. Nenhuma tela específica de configuração do Sites é presumida aqui;
-usar somente um mecanismo protegido efetivamente disponível.
+O `WORKBENCH_OWNER_ID` foi configurado como segredo na revisão 2. A leitura
+administrativa limitada à tabela de projetos localizou o registro legado do
+repositório `ofelipepeixoto/rea`, ID imutável `1417322346`, autorizado em
+17/10/2026 às 20:19:10 UTC. O conector GitHub confirmou independentemente esse
+repositório e seu proprietário. Foi preservada a chave já persistida, sem
+reatribuir ou mesclar registros. O valor não foi copiado para Git ou logs.
+Isso não comprova equivalência com a identidade nativa da sessão atual nem
+homologa o OAuth: o vínculo é uma configuração administrativa do servidor para
+conservar o histórico sob o login GitHub autorizado. Não foi usado cadastro
+automático, e-mail ou ID do painel Sites para eleger um novo proprietário.
+
+O inventário D1 confirmou as duas tabelas de autenticação após o deploy;
+seus registros não foram consultados. A republicação da mesma versão aplicou
+a revisão 2 sem habilitar o login. O menor passo restante é gerar/configurar o
+Client Secret por meio protegido. Não publicar o valor no chat, fonte, frontend
+ou logs. Nenhuma tela específica de configuração do Sites é presumida aqui;
+usar somente um mecanismo protegido efetivamente disponível. A conexão do
+navegador passou a expirar durante o fechamento; não houve nova geração de
+credencial ou tentativa de contornar essa indisponibilidade.
 
 Depois de conferir a configuração, realizar a homologação autorizada do fluxo:
 entrada pelo GitHub, retorno ao mesmo histórico do proprietário, conta sem

@@ -2,6 +2,23 @@
 
 Este helper testa somente arquivos e conexões de loopback criados por ele. Não instala software, inicia REA, lê repositórios, executa JavaScript do alvo ou altera o Site. A importação JSON e a homologação hospedada são entregas separadas.
 
+## Estado atual e próximo passo
+
+O Bubblewrap privado 0.13.1 foi compilado e passou nos 12 controles do pré-flight,
+segundo os retornos do operador. As 409 dependências do REA estão instaladas com
+lockfile íntegro. A compilação completa falhou em duas execuções registradas
+(OOM e timeout); a análise do motor ainda não ocorreu.
+
+O próximo procedimento é a [preparação limitada do runtime](rea-runtime-preparacao-2026-10-21.md).
+As seções posteriores preservam a trajetória e os comandos das etapas anteriores;
+essas etapas não precisam ser repetidas. `memory_enforced`/`ready_for_rea` do helper
+continuam false por contrato, mesmo com os limites externos daquela unidade
+verificados. A futura análise precisa de seus próprios limites e prova de execução.
+
+O Site v13 publicado e seu login GitHub configurado pertencem à área hospedada.
+O bloqueio tratado aqui é o runtime/executor REA local e não exige configurar
+novamente o OAuth, credenciais ou a VPS.
+
 ## Estado observado
 
 O operador confirmou Ubuntu em WSL 2, kernel 6.18.54.1-microsoft-standard-WSL2, x86_64 e Bubblewrap 0.11.1. Uma chamada benigna com cinco namespaces explícitos e /bin/true retornou zero. Depois, confirmou checksum e versão v24.19.0 do Node Linux oficial. Esses resultados relatados pelo operador não são uma execução deste helper nem comprovação de execução isolada do REA.
@@ -51,96 +68,15 @@ Em 21/10/2026, o operador confirmou o checkout dedicado do próprio repositório
 
 A instalação `npm ci --ignore-scripts --include=dev --include=optional`, com configuração/cache dedicados e ambiente mínimo, terminou com 409 pacotes. O lockfile permaneceu íntegro e `scripts/check-dependency-install.mjs` terminou com `DEPENDENCIAS_OK`. A unidade transitória solicitou 2 GiB, swap zero, 128 tarefas, quota de uma CPU e 600 segundos; esses são parâmetros da instalação informada, não medição de consumo nem prova dos futuros limites da análise. A instalação precisou de rede para o registry; não foi uma análise offline. O aviso de manutenção de `prebuild-install@7.1.3` não impediu a instalação e permanece registrado. O inventário desses pacotes é separado da triagem das dependências web.
 
-Compilação e primeira execução do REA permanecem pendentes. `DEPENDENCIAS_OK` não comprova binários opcionais disponíveis nem um runtime compilado.
+A compilação completa falhou por limites de recursos, conforme registro abaixo. A primeira execução do REA permanece pendente. `DEPENDENCIAS_OK` não comprova binários opcionais disponíveis nem um runtime compilado.
 
-## Compilação offline proposta — ainda sem resultado
+## Compilação completa — falhas observadas e retomada
 
-O comando abaixo usa somente o checkout dedicado já preparado, o Node Linux e o npm fixados. Executa os scripts de build da ferramenta confiável; não recebe arquivos de alvo. O `compile` limpa o próprio diretório gerado `dist`, executa TypeScript e Rolldown. Não publicar esse diretório nem `node_modules`. Qualquer erro bloqueia o próximo passo; não retirar namespaces, `NoNewPrivileges`, limites ou habilitar scripts de instalação para contorná-lo.
+O operador tentou o comando `npm run compile` na unidade isolada de 2 GiB, swap zero, 128 tarefas, quota de uma CPU e prazo de 600 segundos. O journal fornecido contém dois eventos separados: uma execução terminou em `oom-kill`, após 3 min 9,762 s e pico de 2 GiB; outra atingiu `timeout`, após 10 min 0,755 s e pico de 2 GiB. Os registros não identificam qual subprocesso provocou cada consumo. Nenhum dos cinco arquivos sentinela finais estava presente e não vazio. O diff rastreado permaneceu vazio e o lockfile manteve o hash fixado. A compilação não foi concluída; não repetir automaticamente o mesmo comando ou ampliar seus limites.
 
-~~~bash
-(
-  set -eu
-  umask 077
-  rea_base="$HOME/.local/share/security-workbench"
-  rea_checkout="$rea_base/rea-3e7c630"
-  rea_bwrap="$rea_base/bubblewrap-0.13.1/bin/bwrap"
+A retomada está no [procedimento de emissão e empacotamento separados](rea-runtime-preparacao-2026-10-21.md), implementado em `scripts/rea-prepare-runtime.sh`. Ele mantém o compilador fixado, a configuração do projeto e o bundler original, mas usa `--noCheck` para gerar JavaScript sem a verificação completa de tipos. O resultado dessa alternativa no WSL ainda é desconhecido. A verificação completa de tipos do motor permanece pendente; os testes TypeScript do aplicativo web são outro gate.
 
-  test "$(git -C "$rea_checkout" rev-parse HEAD)" = \
-    3e7c6302233ecbcb9b92e43ee5a60337738961bd
-  test -z "$(git -C "$rea_checkout" status --porcelain)"
-  test "$("$rea_bwrap" --version)" = 'bubblewrap 0.13.1'
-  cd "$rea_base/bubblewrap-0.13.1/bin"
-  printf '%s  %s\n' \
-    'd7e217424a96140625d3e83df81e66a9e91de40ed9f882d07505da99fa005a76' \
-    'bwrap' | sha256sum --check -
-
-  systemd-run --user --quiet --wait --pipe --collect \
-    --expand-environment=no \
-    --unit=workbench-rea-compile \
-    -p MemoryMax=2G -p MemorySwapMax=0 \
-    -p TasksMax=128 -p CPUQuota=100% \
-    -p RuntimeMaxSec=600s -p TimeoutStopSec=2s \
-    -p KillMode=control-group -p UMask=0077 \
-    -p NoNewPrivileges=yes \
-    /usr/bin/env -i LANG=C PATH=/usr/bin:/bin \
-    /bin/sh -eu -c '
-      rea_cgroup=$(cut -d: -f3 /proc/self/cgroup)
-      test "$(cat "/sys/fs/cgroup${rea_cgroup}/memory.max")" = 2147483648
-      test "$(cat "/sys/fs/cgroup${rea_cgroup}/memory.swap.max")" = 0
-      test "$(cat "/sys/fs/cgroup${rea_cgroup}/pids.max")" = 128
-      printf "LIMITES_COMPILACAO_OK\n"
-      exec "$@"
-    ' rea-compile-unit \
-    "$rea_bwrap" \
-    --unshare-user --unshare-net --unshare-pid --unshare-ipc --unshare-uts \
-    --die-with-parent --new-session --clearenv --cap-drop ALL \
-    --ro-bind /usr /usr \
-    --symlink usr/bin /bin --symlink usr/lib /lib \
-    --symlink usr/lib64 /lib64 \
-    --dir /runtime \
-    --ro-bind "$rea_base/node-v24.19.0-linux-x64/bin/node" /runtime/node \
-    --ro-bind "$rea_base/npm-11.16.0/package" /npm \
-    --bind "$rea_checkout" /tool \
-    --proc /proc --dev /dev --tmpfs /tmp \
-    --dir /tmp/home --dir /tmp/cache \
-    --setenv HOME /tmp/home \
-    --setenv XDG_CACHE_HOME /tmp/cache \
-    --setenv TMPDIR /tmp --setenv LANG C \
-    --setenv PATH /runtime:/usr/bin:/bin \
-    --setenv GOMAXPROCS 2 --setenv GOMEMLIMIT 1GiB \
-    --setenv RAYON_NUM_THREADS 2 \
-    --chdir /tool \
-    /bin/sh -eu -c '
-      touch /tmp/global.npmrc
-      /runtime/node scripts/generate-package-metadata.mjs --check
-      exec /runtime/node /npm/bin/npm-cli.js \
-        --userconfig=/dev/null \
-        --globalconfig=/tmp/global.npmrc \
-        --offline --ignore-scripts --no-audit --no-fund \
-        --update-notifier=false run compile
-    ' </dev/null
-
-  cd "$rea_checkout"
-  for rea_file in \
-    dist/generatedPackageMetadata.js \
-    dist/cli-runtime/cli.js \
-    dist/cli-runtime/cliOutput.js \
-    dist/cli-runtime/cliResultOutput.js \
-    dist/composition/javascriptAnalysisWorkerProcess.js
-  do
-    test -f "$rea_file"
-    sha256sum "$rea_file"
-  done
-
-  git diff --exit-code --quiet
-  printf '%s  %s\n' \
-    '4d298e57d8424a14208f470446be51a0f61cdd932650059557acd5bc21009eb6' \
-    'package-lock.json' | sha256sum --check -
-  printf 'RUNTIME_COMPILADO_OK\n'
-)
-~~~
-
-Esse comando foi revisado no código fixado e atualizado para o Bubblewrap privado conferido; ainda não foi executado no ambiente do operador. Confere 2 GiB/swap zero/128 tarefas na própria unidade antes do build. Os controles da compilação não substituem a verificação no executor da futura análise.
+Esse preparo compila somente a ferramenta confiável. Não recebe, importa ou executa JavaScript do alvo e não homologa o engine. Não publicar `dist`, dependências ou logs locais.
 
 ## Atualização do gate Bubblewrap
 

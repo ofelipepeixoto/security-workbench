@@ -137,4 +137,4 @@ dpkg-query -W -f='${Package} ${Version}\n' bubblewrap
 apt-cache policy bubblewrap
 ~~~
 
-Esses dois comandos são somente leitura. O resultado e a correção aplicável permanecem pendentes. As 12 verificações aprovadas do helper continuam válidas para a fixture própria usada, sem constituir auditoria do Bubblewrap ou prontidão para entradas adversariais.
+Esses dois comandos são somente leitura. O operador retornou pacote instalado e candidato `0.11.1-1ubuntu0.1`, nos índices locais de `resolute-updates/main` e `resolute-security/main` amd64. A data de atualização desses índices não foi verificada. Essa versão não comprova a correção; o gate para entradas não confiáveis permanece aberto. Atualizar os índices oficiais e simular somente o upgrade do pacote é o próximo passo; nenhuma atualização de pacote foi realizada. Mesmo um candidato `0.11.1-1ubuntu0.3` não resolve este aviso, pois corresponde à reversão documentada no USN-8779-2. As 12 verificações aprovadas do helper continuam válidas para a fixture própria usada, sem constituir auditoria do Bubblewrap ou prontidão para entradas adversariais.

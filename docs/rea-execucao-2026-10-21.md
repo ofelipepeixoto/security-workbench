@@ -1,4 +1,4 @@
-# REA local: importação entregue e execução isolada bloqueada
+# REA local: importação entregue e motor em preparação
 
 ## Resultado observado
 
@@ -16,7 +16,7 @@ Nesta etapa, Node **24.19.0** com `--permission` apresentou permissões de files
 
 Além disso, o controle em `src/javascript/analysis/JavaScriptAnalysisWorker.ts`, usado por `src/artifacts/javascript/JavaScriptSourceAnalysis.ts`, depende de processo filho, remove `NODE_OPTIONS` e inicia o worker somente com as flags de heap configuradas. As permissões do pai não são uma fronteira herdada pelo worker. Heap/timeout continuam limites úteis, mas não constituem sandbox de rede ou filesystem. Não chamar esse processo de container.
 
-Docker, Podman, Firejail e nsjail não estavam disponíveis no diagnóstico. A mera presença de `systemd-run` não comprova um serviço de isolamento utilizável. Não foi instalado ou compilado o REA depois de demonstrada a falta de isolamento suficiente, pois isso não resolveria o gate de execução. O código do alvo permanece sem executar.
+Docker, Podman, Firejail e nsjail não estavam disponíveis no diagnóstico do ambiente da engenharia. A mera presença de `systemd-run` não comprova um serviço de isolamento utilizável. Nesse ambiente, não foi instalado, compilado ou executado o REA. A preparação posterior no WSL do operador está registrada abaixo e é um ambiente separado. O código do alvo permanece sem executar.
 
 ## Uso local da importação
 
@@ -80,4 +80,14 @@ O operador confirmou nesta conversa Windows/PowerShell, Node **24.19.0**, Docker
 
 Após instalar a distribuição, conferir `wsl --list --verbose`. Somente usando o nome exato retornado e uma distribuição existente, consultar `wsl --distribution NOME --exec uname -r` e `wsl --distribution NOME --exec sh -lc 'command -v node bwrap unshare timeout'`. Esses resultados orientarão o isolamento; não iniciar o REA nem presumir que o Node Windows esteja disponível no Linux.
 
-O próximo aceite de execução exige um mecanismo realmente disponível com rede desabilitada e entrada JS somente leitura, runtime REA fixado e rastreável, limites externos de bytes/tempo/memória e prova de que fixture com efeitos sentinela não escreve nem se conecta. Só então executar uma fixture benigna e uma adversarial com o REA real, preservar versão/digests/limites/horários, comparar a projeção com o resultado nativo e registrar custos observados. Essa prova permanece pendente.
+### Preparação confirmada depois do pré-flight
+
+O operador confirmou Git 2.53.0, checkout dedicado do próprio REA no commit `3e7c6302233ecbcb9b92e43ee5a60337738961bd`, lockfile conferido e npm separado 11.16.0. O tarball oficial desse npm teve SHA-256 `30fc15697c771002878665c29f49dddde9aa8667fa5719854b2f52d3cd19230b` conferido. A instalação `npm ci --ignore-scripts --include=dev --include=optional`, com ambiente mínimo, configuração e cache dedicados, terminou com **409 pacotes**. O lockfile permaneceu íntegro e `scripts/check-dependency-install.mjs` passou, com `DEPENDENCIAS_OK`. A instalação usou rede para obter as dependências; não foi uma análise offline. O aviso de manutenção de `prebuild-install@7.1.3` não impediu a instalação. Esses pacotes pertencem ao motor REA e não estão cobertos pela contagem de três entradas residuais do audit web.
+
+A unidade de instalação solicitou 2 GiB, swap zero, 128 tarefas, quota de uma CPU e 600 segundos; isso não é medição de consumo nem verificação de limites da futura análise. A compilação offline da ferramenta foi preparada e revisada no [guia do PR #30](https://github.com/ofelipepeixoto/security-workbench/pull/30), mas ainda não há resultado de compilação ou execução do motor.
+
+### Verificação adicional do pacote de isolamento
+
+A fonte primária [GHSA-pxhw-h44j-8pfx / CVE-2026-87766](https://github.com/containers/bubblewrap/security/advisories/GHSA-pxhw-h44j-8pfx) informa correção upstream em Bubblewrap 0.12.0. A condição depende de criar destinos durante o setup sob conteúdo de filesystem controlado por atacante. Ela não foi identificada no comando de compilação com destinos fixos e sem arquivos de alvo. Não há exploração observada. A versão completa do pacote Ubuntu ainda não foi consultada; `bwrap --version` 0.11.1 não informa backports. O [USN-8779-2](https://ubuntu.com/security/notices/USN-8779-2) reverteu o patch anterior por regressão, portanto o aviso anterior isolado não comprova correção. Consultar pacote e correção aplicável antes de usar entradas não confiáveis, sem upgrade implícito ou remoção de controles.
+
+O próximo aceite exige o runtime compilado e rastreável, resolução desse gate para entradas não confiáveis e aplicação/verificação dos limites externos de bytes/tempo/memória à própria família de processos REA. Executar primeiro a fixture própria inerte, sem importar ou executar seu JavaScript, e só depois uma fixture adversarial estática controlada. Preservar versão/digests/limites/horários e comparar a projeção com o Evidence nativo. Essa prova permanece pendente.

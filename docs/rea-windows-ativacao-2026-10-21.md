@@ -44,3 +44,97 @@ Fontes primárias: [Bubblewrap](https://github.com/containers/bubblewrap), [manu
 `fixtures/rea/inert-app.js` é entrada própria e inerte para a futura análise estática, não um resultado REA. Seu SHA-256 é `d99e67189229b7c47492d92fa3995ad9ae4110490ffeeb16483efeb420c3b29e`. O commit deste PR vincula seus bytes ao repositório do proprietário. Não importar nem executar o arquivo. Rótulos de endpoint e armazenamento são estrutura, não vulnerabilidades. Nenhuma análise do motor foi realizada ao adicionar essa fixture.
 
 O proprietário informou possuir uma VPS Hostinger. Capacidade, serviços existentes, acesso e isolamento não foram inspecionados. Workers/D1 e WSL atendem à preparação atual; a VPS permanece uma opção posterior para executor remoto, sem contratação ou mudança de infraestrutura nesta rodada.
+
+## Preparação do motor relatada pelo operador
+
+Em 21/10/2026, o operador confirmou o checkout dedicado do próprio repositório REA no commit `3e7c6302233ecbcb9b92e43ee5a60337738961bd`, sem alterações rastreadas. O lockfile teve SHA-256 `4d298e57d8424a14208f470446be51a0f61cdd932650059557acd5bc21009eb6` conferido. O npm separado `11.16.0`, indicado por `packageManager`, teve o tarball oficial conferido com SHA-256 `30fc15697c771002878665c29f49dddde9aa8667fa5719854b2f52d3cd19230b`.
+
+A instalação `npm ci --ignore-scripts --include=dev --include=optional`, com configuração/cache dedicados e ambiente mínimo, terminou com 409 pacotes. O lockfile permaneceu íntegro e `scripts/check-dependency-install.mjs` terminou com `DEPENDENCIAS_OK`. A unidade transitória solicitou 2 GiB, swap zero, 128 tarefas, quota de uma CPU e 600 segundos; esses são parâmetros da instalação informada, não medição de consumo nem prova dos futuros limites da análise. A instalação precisou de rede para o registry; não foi uma análise offline. O aviso de manutenção de `prebuild-install@7.1.3` não impediu a instalação e permanece registrado. O inventário desses pacotes é separado da triagem das dependências web.
+
+Compilação e primeira execução do REA permanecem pendentes. `DEPENDENCIAS_OK` não comprova binários opcionais disponíveis nem um runtime compilado.
+
+## Compilação offline proposta — ainda sem resultado
+
+O comando abaixo usa somente o checkout dedicado já preparado, o Node Linux e o npm fixados. Executa os scripts de build da ferramenta confiável; não recebe arquivos de alvo. O `compile` limpa o próprio diretório gerado `dist`, executa TypeScript e Rolldown. Não publicar esse diretório nem `node_modules`. Qualquer erro bloqueia o próximo passo; não retirar namespaces, `NoNewPrivileges`, limites ou habilitar scripts de instalação para contorná-lo.
+
+~~~bash
+(
+  set -eu
+  umask 077
+  rea_base="$HOME/.local/share/security-workbench"
+  rea_checkout="$rea_base/rea-3e7c630"
+
+  test "$(git -C "$rea_checkout" rev-parse HEAD)" = \
+    3e7c6302233ecbcb9b92e43ee5a60337738961bd
+  test -z "$(git -C "$rea_checkout" status --porcelain)"
+
+  systemd-run --user --quiet --wait --pipe --collect \
+    --expand-environment=no \
+    --unit=workbench-rea-compile \
+    -p MemoryMax=2G -p MemorySwapMax=0 \
+    -p TasksMax=128 -p CPUQuota=100% \
+    -p RuntimeMaxSec=600s -p TimeoutStopSec=2s \
+    -p KillMode=control-group -p UMask=0077 \
+    -p NoNewPrivileges=yes \
+    /usr/bin/bwrap \
+    --unshare-user --unshare-net --unshare-pid --unshare-ipc --unshare-uts \
+    --die-with-parent --new-session --clearenv --cap-drop ALL \
+    --ro-bind /usr /usr \
+    --symlink usr/bin /bin --symlink usr/lib /lib \
+    --symlink usr/lib64 /lib64 \
+    --dir /runtime \
+    --ro-bind "$rea_base/node-v24.19.0-linux-x64/bin/node" /runtime/node \
+    --ro-bind "$rea_base/npm-11.16.0/package" /npm \
+    --bind "$rea_checkout" /tool \
+    --proc /proc --dev /dev --tmpfs /tmp \
+    --dir /tmp/home --dir /tmp/cache \
+    --setenv HOME /tmp/home \
+    --setenv XDG_CACHE_HOME /tmp/cache \
+    --setenv TMPDIR /tmp --setenv LANG C \
+    --setenv PATH /runtime:/usr/bin:/bin \
+    --setenv GOMAXPROCS 2 --setenv GOMEMLIMIT 1GiB \
+    --setenv RAYON_NUM_THREADS 2 \
+    --chdir /tool \
+    /bin/sh -eu -c '
+      touch /tmp/global.npmrc
+      /runtime/node scripts/generate-package-metadata.mjs --check
+      exec /runtime/node /npm/bin/npm-cli.js \
+        --userconfig=/dev/null \
+        --globalconfig=/tmp/global.npmrc \
+        --offline --ignore-scripts --no-audit --no-fund \
+        --update-notifier=false run compile
+    ' </dev/null
+
+  cd "$rea_checkout"
+  for rea_file in \
+    dist/generatedPackageMetadata.js \
+    dist/cli-runtime/cli.js \
+    dist/cli-runtime/cliOutput.js \
+    dist/cli-runtime/cliResultOutput.js \
+    dist/composition/javascriptAnalysisWorkerProcess.js
+  do
+    test -f "$rea_file"
+  done
+
+  git diff --exit-code --quiet
+  printf '%s  %s\n' \
+    '4d298e57d8424a14208f470446be51a0f61cdd932650059557acd5bc21009eb6' \
+    'package-lock.json' | sha256sum --check -
+  printf 'RUNTIME_COMPILADO_OK\n'
+)
+~~~
+
+Esse comando foi revisado no código fixado; ainda não foi executado no ambiente do operador. Os limites pedidos para compilação não substituem a verificação dos limites efetivos no executor da futura análise.
+
+## Atualização do gate Bubblewrap
+
+A versão curta `bwrap --version` não informa o pacote completo nem eventuais patches da distribuição. O [aviso oficial GHSA-pxhw-h44j-8pfx / CVE-2026-87766](https://github.com/containers/bubblewrap/security/advisories/GHSA-pxhw-h44j-8pfx) afeta versões upstream anteriores a 0.12.0: durante o setup, criar destinos sob conteúdo de filesystem controlado por atacante pode seguir symlinks para fora. Não foi observada exploração e essa condição não foi identificada no layout fixo acima, que não cria descendentes dentro de `/tool`. Isso não autoriza usos arbitrários do Bubblewrap.
+
+O [USN-8779-2](https://ubuntu.com/security/notices/USN-8779-2), de 18/09/2026, informa a reversão do patch anterior por regressão. Portanto o USN-8779-1 sozinho não prova uma correção atual. Antes de aceitar entradas não confiáveis, obter a identificação completa e consultar a correção aplicável; não atualizar a distribuição, instalar PPA ou substituir o binário implicitamente:
+
+~~~bash
+dpkg-query -W -f='${Package} ${Version}\n' bubblewrap
+apt-cache policy bubblewrap
+~~~
+
+Esses dois comandos são somente leitura. O resultado e a correção aplicável permanecem pendentes. As 12 verificações aprovadas do helper continuam válidas para a fixture própria usada, sem constituir auditoria do Bubblewrap ou prontidão para entradas adversariais.

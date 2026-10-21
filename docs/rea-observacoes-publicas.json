@@ -1,0 +1,75 @@
+{
+  "scope": "Public HTML and first-party script URLs only; no auth, JS execution, scanning or repository upload",
+  "observed_at": "2026-10-21T19:05:01Z",
+  "rea_commit": "3e7c6302233ecbcb9b92e43ee5a60337738961bd",
+  "resources": [
+    {
+      "kind": "html",
+      "url": "https://www.gitguard.com.br/en",
+      "http_status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "bytes": 226469,
+      "sha256": "ef9371ba1dc2c747ff79a7775d57716f924f315c755572214e8260146da18ee3"
+    },
+    {
+      "kind": "javascript-not-executed",
+      "url": "https://www.gitguard.com.br/_next/static/chunks/1dd3208c-a9f562128d548c18.js",
+      "http_status": 200,
+      "content_type": "application/javascript; charset=utf-8",
+      "bytes": 172835,
+      "sha256": "359deca4a1b7762a78f0fd35eafb5f746e88a2e793056c0e1e2b819d83f8c0fa"
+    },
+    {
+      "kind": "javascript-not-executed",
+      "url": "https://www.gitguard.com.br/_next/static/chunks/1528-e91192ff1df10525.js",
+      "http_status": 200,
+      "content_type": "application/javascript; charset=utf-8",
+      "bytes": 124715,
+      "sha256": "725b2684726ca47ba899b6c30abccc37c6dcd768780b829f4000fa75c52f33b9"
+    },
+    {
+      "kind": "public-login-html-not-executed",
+      "url": "https://www.gitguard.com.br/en/login",
+      "http_status": 200,
+      "bytes": 42430,
+      "sha256": "cbd97c905042bea47279d8c94720f8fe50623827d25476dd8c6ae43248be9bad"
+    }
+  ],
+  "page_title": "GitGuard — security for the code your AI wrote",
+  "script_urls": [
+    "/_next/static/chunks/1dd3208c-a9f562128d548c18.js",
+    "/_next/static/chunks/1528-e91192ff1df10525.js",
+    "/_next/static/chunks/main-app-420abd7798f6e175.js",
+    "/_next/static/chunks/75504863-8ad3492839f5dab5.js",
+    "/_next/static/chunks/7563-24e9086691dc2b11.js",
+    "/_next/static/chunks/6340-5550e4651ee3bbcc.js",
+    "/_next/static/chunks/1453-b55937f96b28714b.js",
+    "/_next/static/chunks/5487-d833f5ae748b44df.js",
+    "/_next/static/chunks/3935-314afe00069a88ff.js",
+    "/_next/static/chunks/2023-19dc4ceb7a33c44e.js",
+    "/_next/static/chunks/app/%5Blocale%5D/page-4ee915585fb2d552.js",
+    "/_next/static/chunks/542-bbe2bbb046202ea7.js",
+    "/_next/static/chunks/8368-184205326716e9ff.js",
+    "/_next/static/chunks/app/layout-fc8a575b54ff8be3.js",
+    "/_next/static/chunks/app/error-8f525c9940ad1b51.js",
+    "/_next/static/chunks/app/not-found-25526a0822417bdc.js",
+    "/_next/static/chunks/2646-bc13ed95e62aece0.js",
+    "/_next/static/chunks/8897-02c4217c1d03c81c.js",
+    "/_next/static/chunks/4631-2d4d7d2c20101a71.js",
+    "/_next/static/chunks/792-e0abfa297dc00f3c.js",
+    "/_next/static/chunks/app/%5Blocale%5D/(app)/layout-db4d564b4bbe3e0b.js",
+    "/_next/static/chunks/polyfills-42372ed130431b0a.js",
+    "/_next/static/chunks/webpack-df78490b1ef1a27d.js"
+  ],
+  "link_origins": [
+    "www.gitguard.com.br"
+  ],
+  "login_observations": {
+    "github_label_present": true,
+    "account_actions_not_taken": true,
+    "links": [
+      "/en/privacy",
+      "/en/terms"
+    ]
+  }
+}

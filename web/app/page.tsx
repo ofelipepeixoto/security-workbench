@@ -1,7 +1,5 @@
-import Workbench from "./workbench";
-import { getWorkbenchAccess } from "./workbench-identity";
+import { WorkbenchPage, type WorkbenchSearch } from "../components/workbench-page";
 export const dynamic = "force-dynamic";
-export default async function Home() {
-  const access = await getWorkbenchAccess();
-  return <Workbench signedIn={Boolean(access.user)} name={access.user?.displayName || "Visitante"} githubReady={access.githubReady} csrfToken={access.user?.csrfToken || ""} />;
+export default async function Page({ searchParams }: { searchParams: Promise<WorkbenchSearch> }) {
+  return <WorkbenchPage view="dashboard" searchParams={searchParams} />;
 }

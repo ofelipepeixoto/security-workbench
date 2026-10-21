@@ -1,0 +1,8 @@
+export type WorkbenchView = "dashboard" | "projects" | "findings" | "runs" | "detail" | "compare" | "reports" | "profile" | "account" | "help" | "onboarding";
+export type Project = { id: string; repo: string; repository_id: number; authorized_at: string; has_runs?: boolean };
+export type Finding = { fingerprint: string; kind: string; path: string; line: number; status: string; confidence: string; evidence: string; impact: string; recommendation: string };
+export type Run = { id: string; project_id: string; repo: string; repository_id?: number; status: string; revision: string | null; created_at: string; files_read: number | null; bytes_read?: number | null; partial: boolean; findings_count?: number | null; digest?: string; omissions?: string[]; findings?: Finding[]; dependencies?: { name: string; version: string; source: string }[]; failure_code?: string; source?: string; verified_revision?: boolean };
+export type HistoricalFinding = Finding & { run_id: string; project_id: string; repo: string; revision: string; created_at: string; source?: string };
+export type FindingsResult = { findings: HistoricalFinding[]; truncated: boolean; runs_considered: number };
+export type Comparison = { new: string[]; no_longer_detected: string[]; still_detected: string[]; partial: boolean };
+export type Filters = { q: string; project: string; status: string; kind: string; from: string; to: string; before: string; after: string; run: string };

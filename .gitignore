@@ -9,3 +9,5 @@ __pycache__/
 *.db
 *.sqlite*
 reports/
+!web/app/reports/
+!web/app/reports/page.tsx

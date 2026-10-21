@@ -163,11 +163,11 @@ Primeiro instalar somente as ferramentas de compilação e dependências normais
 
 O operador forneceu saída com `FERRAMENTAS_BWRAP_OK`: GCC 15.2.0, Python 3.14.4, Meson 1.10.1, Ninja 1.13.2 e libcap 2.75. APT instalou 44 pacotes e atualizou cinco, sem remoções; 126 permaneceram não atualizados. Foram obtidos 86,6 MB e APT previu 277 MB adicionais de disco, sem medição posterior do espaço usado. As atualizações necessárias incluíram libc6, libc-bin, libc-gconv-modules-extra, locales e libbz2-1.0; não foi um upgrade global. O Python observado atende à preparação Meson, sem homologar o núcleo Workbench que declara Python 3.12.
 
-A engenharia baixou separadamente o tarball oficial para inspeção em memória: 129472 bytes, SHA-256 publicado conferido, diretório raiz `bubblewrap-0.13.1` e arquivo Meson presente. Não houve extração, compilação ou execução do fonte nessa inspeção. O download/conferência local do operador, build, instalação no prefix privado e teste do executável continuam pendentes. Se AppArmor ou namespaces recusarem o executável privado, registrar o bloqueio sem desabilitar a proteção ou recorrer silenciosamente ao binário antigo.
+A engenharia baixou separadamente o tarball oficial para inspeção em memória: 129472 bytes, SHA-256 publicado conferido, diretório raiz `bubblewrap-0.13.1` e arquivo Meson presente. Não houve extração, compilação ou execução do fonte nessa inspeção. O operador posteriormente concluiu o build e a instalação privados, conforme resultado abaixo; o pré-flight do executável continua pendente. Se AppArmor ou namespaces recusarem o executável privado, registrar o bloqueio sem desabilitar a proteção ou recorrer silenciosamente ao binário antigo.
 
 `runPreflight` aceita, somente para chamada por módulo local confiável, `bwrapExecutable` com caminho absoluto POSIX sem NUL. O padrão continua `/usr/bin/bwrap`; disponibilidade e processo usam o mesmo caminho selecionado, sem seleção por PATH/ambiente nem fallback. A CLI continua sem argumentos e não recebe código ou caminhos de alvo. O invólucro local deverá apontar explicitamente para o executável conferido e imprimir somente o JSON projetado; `memory_enforced` e `ready_for_rea` continuam false.
 
-## Build privado do Bubblewrap — proposto, ainda não executado pelo operador
+## Build privado do Bubblewrap — resultado fornecido pelo operador
 
 O bloco preserva diretórios existentes: se os dois caminhos dedicados já existirem, para sem apagá-los. O download usa somente HTTPS, configuração curl desativada e hash fixado antes de extrair. Não requer sudo. O bootstrap usa o Bubblewrap do sistema somente para compilar fonte confiável, com destinos fixos e nenhum destino criado sob o fonte montado. A condição da CVE de setup não foi identificada nesse layout; isso não aceita o binário antigo para usos arbitrários nem substitui o pré-flight posterior do novo executável.
 
@@ -244,4 +244,65 @@ Durante Meson/Ninja a rede fica em namespace separado, fonte e `/usr` somente le
 )
 ~~~
 
-Somente após resultado observado, executar a fixture própria pelo módulo do helper selecionando exatamente esse binário. Não usar o hash do tarball como se fosse o hash do executável compilado; o segundo digest será calculado localmente pelo bloco. Nenhuma análise REA é iniciada por esse build.
+O operador retornou os sete passos C/link concluídos, instalação em `/output/bin`, versão `bubblewrap 0.13.1`, `BWRAP_COMPILADO_OK` e SHA-256 do binário **`d7e217424a96140625d3e83df81e66a9e91de40ed9f882d07505da99fa005a76`**. Esse digest observado é diferente do digest do tarball. O bloco compilou e instalou somente a ferramenta confiável em prefix privado; não iniciou análise REA. O pré-flight real desse executável e sua disponibilidade de namespaces ainda estão pendentes. Os limites solicitados no build não foram apresentados como medição de consumo nem homologação de recursos do engine.
+
+## Pré-flight do executável privado — proposto, ainda sem resultado
+
+O helper fixado em `7e2dd120e20cb8f0dbbaca58604ac623d9d40825` tem SHA-256 `8db65c9d81aad084a33efff221876d7e14571719188f6e56e72148e6976fdf02`. O bloco usa nome local novo, confere o binário recém-compilado e o helper antes de invocar o módulo. A sentinela `rea-preflight-wrapper` em argv[1] é necessária: o helper é importado por argv[2], sem acionar sua CLI. A engenharia verificou esse roteamento com retorno antecipado de plataforma não suportada, sem tentar namespaces na cloud.
+
+Os valores cgroup são conferidos dentro da mesma unidade que inicia Node/helper/Bubblewrap. O controle positivo de loopback acontece fora do namespace, mas dentro dessa unidade; o controle negativo acontece dentro da sandbox. `LIMITES_PREFLIGHT_OK` só aparece depois dos três valores esperados. `memory_enforced` e `ready_for_rea` no JSON continuam false por contrato: o helper não prova o futuro engine. Falha de política/namespace permanece bloqueio, sem fallback ou remoção de `NoNewPrivileges`.
+
+~~~bash
+(
+  set -eu
+  umask 077
+  rea_base="$HOME/.local/share/security-workbench"
+  rea_bwrap="$rea_base/bubblewrap-0.13.1/bin/bwrap"
+  rea_helper="$rea_base/rea-sandbox-preflight-7e2dd12.mjs"
+
+  test -x "$rea_bwrap"
+  test "$("$rea_bwrap" --version)" = 'bubblewrap 0.13.1'
+  cd "$rea_base/bubblewrap-0.13.1/bin"
+  printf '%s  %s\n' \
+    'd7e217424a96140625d3e83df81e66a9e91de40ed9f882d07505da99fa005a76' \
+    'bwrap' | sha256sum --check -
+
+  test ! -e "$rea_helper"
+  curl --disable --fail --location \
+    --proto '=https' --proto-redir '=https' --tlsv1.2 \
+    --max-time 60 --max-filesize 65536 \
+    --output "$rea_helper" \
+    https://raw.githubusercontent.com/ofelipepeixoto/security-workbench/7e2dd120e20cb8f0dbbaca58604ac623d9d40825/scripts/rea-sandbox-preflight.mjs
+
+  cd "$rea_base"
+  printf '%s  %s\n' \
+    '8db65c9d81aad084a33efff221876d7e14571719188f6e56e72148e6976fdf02' \
+    'rea-sandbox-preflight-7e2dd12.mjs' | sha256sum --check -
+
+  systemd-run --user --quiet --wait --pipe --collect \
+    --expand-environment=no \
+    --unit=workbench-rea-private-preflight \
+    -p MemoryMax=512M -p MemorySwapMax=0 \
+    -p TasksMax=32 -p CPUQuota=100% \
+    -p RuntimeMaxSec=20s -p TimeoutStopSec=2s \
+    -p KillMode=control-group -p NoNewPrivileges=yes \
+    /usr/bin/env -i LANG=C \
+    PATH="$rea_base/node-v24.19.0-linux-x64/bin:/usr/bin:/bin" \
+    /bin/sh -eu -c '
+      rea_cgroup=$(cut -d: -f3 /proc/self/cgroup)
+      test "$(cat "/sys/fs/cgroup${rea_cgroup}/memory.max")" = 536870912
+      test "$(cat "/sys/fs/cgroup${rea_cgroup}/memory.swap.max")" = 0
+      test "$(cat "/sys/fs/cgroup${rea_cgroup}/pids.max")" = 32
+      printf "LIMITES_PREFLIGHT_OK\n"
+      exec "$@"
+    ' rea-preflight-unit \
+    "$rea_base/node-v24.19.0-linux-x64/bin/node" \
+    --input-type=module -e '
+      import { pathToFileURL } from "node:url";
+      const { runPreflight } = await import(pathToFileURL(process.argv[2]).href);
+      const result = await runPreflight({ bwrapExecutable: process.argv[3] });
+      process.stdout.write(JSON.stringify(result, null, 2) + "\n");
+      process.exitCode = result.passed ? 0 : 2;
+    ' rea-preflight-wrapper "$rea_helper" "$rea_bwrap" </dev/null
+)
+~~~

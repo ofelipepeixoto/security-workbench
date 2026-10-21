@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -42,6 +43,14 @@ def render_report(run: dict) -> str:
     if run["omissions"]:
         lines.extend(["", "## Limitações de leitura", ""])
         lines.extend(f"- {item}" for item in run["omissions"])
+    if run.get("source") == "rea-import":
+        provenance = run.get("provenance", {})
+        lines.extend([
+            "", "## Proveniência REA importada", "",
+            "Contagens e digest do artefato são declarações do JSON importado. Não comprovam execução isolada, autenticidade do produtor ou vínculo com o commit.",
+            f"SHA-256 observado do relatório importado: `{provenance.get('report_sha256', '')}`.",
+            "Observações estruturais permanecem candidatos; valores de código, URLs e caminhos absolutos do produtor foram omitidos.",
+        ])
     return "\n".join(lines) + "\n"
 
 
@@ -61,6 +70,10 @@ def parser() -> argparse.ArgumentParser:
     github = sub.add_parser("scan-github", help="Ler GitHub em modo somente leitura")
     github.add_argument("--repo", required=True)
     github.add_argument("--revision", required=True, help="SHA completo do commit (40 hexadecimais)")
+    rea = sub.add_parser("import-rea", help="Importar Evidence estático REA local, sem executar o alvo")
+    rea.add_argument("--repo", required=True)
+    rea.add_argument("--revision", required=True, help="Commit declarado de 40 hexadecimais, não verificado pela importação")
+    rea.add_argument("--evidence", type=Path, required=True, help="JSON Evidence do analyze-javascript-application --json")
     serve = sub.add_parser("serve", help="Interface privada em 127.0.0.1")
     serve.add_argument("--port", type=int, default=8765)
     sub.add_parser("runs", help="Listar análises")
@@ -96,6 +109,16 @@ def main(argv: list[str] | None = None) -> int:
                 revision, result = inspect_github(repo, args.revision, repository_id=scoped_repository_id(db, repo))
                 run_id = save_run(db, repo, revision, result, source="github", verified_revision=True)
                 print(f"Análise {run_id}: {result['files_read']} arquivos, {len(result['findings'])} candidatos; parcial={result['partial']}")
+            elif args.action == "import-rea":
+                from .rea import parse_rea_evidence, read_evidence
+                repo = require_scope(db, args.repo)
+                repository_id = scoped_repository_id(db, repo)
+                if not re.fullmatch(r"[a-fA-F0-9]{40}", args.revision):
+                    raise ValueError("A revisão declarada precisa ser SHA completo de 40 hexadecimais.")
+                result = parse_rea_evidence(read_evidence(args.evidence))
+                result["repository_id"] = repository_id
+                run_id = save_run(db, repo, args.revision.lower(), result, source="rea-import")
+                print(f"Importação {run_id}: {len(result['findings'])} candidatos estruturais; cobertura parcial; execução REA não comprovada pelo Workbench.")
             elif args.action == "runs":
                 for row in db.execute("SELECT id, repo, revision, created_at, partial FROM runs ORDER BY created_at DESC"):
                     print(" | ".join(map(str, row)))

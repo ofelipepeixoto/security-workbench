@@ -6,6 +6,27 @@ on:
 permissions:
   contents: read
 jobs:
+  web-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: web
+    env:
+      WRANGLER_SEND_METRICS: 'false'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+      - run: npm install --global pnpm@11.25.0 --ignore-scripts
+      - name: Install from frozen lockfile
+        run: bash scripts/sites-env.sh -- bash scripts/install-pnpm.sh
+      - run: node --test tests/*.test.mjs
+      - run: node node_modules/typescript/bin/tsc --noEmit --incremental false
+      - run: node scripts/run-framework.mjs build
   test:
     runs-on: ubuntu-latest
     steps:

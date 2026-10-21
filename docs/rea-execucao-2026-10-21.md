@@ -1,8 +1,8 @@
-# REA local: importação entregue e motor em preparação
+# REA local: primeira fixture concluída e importação em homologação
 
 ## Resultado observado
 
-Foi implementada a importação offline de um subconjunto do Evidence JSON estático do REA no núcleo Python/SQLite. Não foi concluída uma execução real do REA sobre artefato de terceiro. Fixtures de teste são autorais e explicitamente sintéticas; não são relatórios produzidos pelo REA. Nenhum código do alvo foi executado, nenhum serviço pago foi contratado e nenhuma sandbox foi declarada sem comprovação.
+Foi implementada a importação offline de um subconjunto do Evidence JSON estático do REA no núcleo Python/SQLite. Não foi concluída uma execução real do REA sobre artefato de terceiro. As fixtures anteriores de teste do importador são autorais e explicitamente sintéticas; o retorno posterior do operador, registrado ao final, contém a primeira saída nativa do motor sobre a fixture própria inerte. Nenhum código do alvo foi executado, nenhum serviço pago foi contratado e nenhuma sandbox foi declarada sem comprovação.
 
 Verificação desta implementação: 25 testes Python passaram, incluindo 8 de importação, e 9 testes do parser web passaram. As projeções Python e Node foram comparadas sobre os mesmos bytes de três fixtures sintéticas (estrutural, benigna e observação runtime omitida) e produziram objetos idênticos. Há cobertura de escopo, preservação do estado candidate, revisão, relatório, comparação entre imports do mesmo analisador, rejeição de JSON malformado/duplicado e limites de entrada. São testes locais com fixtures; não homologam a execução REA nem a hospedagem. O parser web não acrescenta dependências.
 
@@ -116,6 +116,14 @@ O [PR #32](https://github.com/ofelipepeixoto/security-workbench/pull/32), com ba
 
 ### Retomada sem repetir o preparo
 
-O preparo local terminou com emit 4 s/bundle 2 s e cinco hashes. Não repetir instalações ou compilação. Falta somente o resultado da execução única do helper já existente no PR #32; depois, validar o Evidence com o importador da plataforma. O helper não possui retry automático, e sua chamada da análise é limitada por unidade/cliente. Esta auditoria não inspecionou processos ativos no PC: o ambiente de execução desta conversa é separado do Windows/WSL.
+O preparo local terminou com emit 4 s/bundle 2 s e cinco hashes. Não repetir instalações ou compilação. O operador posteriormente concluiu a execução única do helper do PR #32; o próximo passo é importar esse mesmo Evidence na plataforma. O helper não possui retry automático, e sua chamada da análise é limitada por unidade/cliente. Esta auditoria não inspecionou processos ativos no PC: o ambiente de execução desta conversa é separado do Windows/WSL.
 
 A interface recebeu uma correção independente no PR #29: retentativas do mesmo projeto/SHA/digest conservam o requestId no formulário aberto, permitindo ao backend devolver a análise já persistida quando a resposta anterior se perdeu. O teste integra o rastreador cliente com a rota real e SQLite em memória; não usa o engine ou um relatório real. Fechar/reabrir ou recarregar encerra esse contexto em memória; nenhuma evidência bruta é gravada em storage do navegador. Os 102 testes Node, TypeScript, lint dos arquivos alterados e build passaram; publicação e QA hospedada desse incremento ainda estão pendentes.
+
+### Primeira análise nativa concluída — retorno posterior do operador
+
+Em 21/10/2026, o operador forneceu o resultado do helper fixado `72b9b3a14f306305c02efe07962ab3205f9ec1fd`, checksum `45f9bc988d86b7cf275f89cc7b9b1f20e038d83a8f218c76f7844b7a6617371c` aprovado: `terminacao_unidade=confirmada`, `native_fixture_completed:true` e `FIXTURE_NATIVA_CONCLUIDA`. Início 23:45:41 UTC, fim 23:45:48 UTC, sete segundos decorridos. Uma fonte/342 bytes analisada, zero falhas, grafo 4 nós/3 arestas, aplicação complete e semântica unknown. Há 1 finding nativo e 6 limitações; isso não confirma vulnerabilidade nem quantidade de candidatos importados.
+
+Evidence privado: 31.834 bytes, SHA-256 `a0919437dff28879897da289284199daea0f88ccb57a3dea047f61ef8e6581a4`. Raiz declarada pelo engine: `fbb1642452f6296f6113c9978a5af9f8ee769592e226ca98f5d01e6359dffc41`. Os pins de motor/fixture são os registrados acima. O sucesso do helper fixado implica seus gates da unidade (1 GiB/swap zero/64 tarefas/uma CPU/30 s), NoNewPrivs e sandbox, sem medição de consumo. O teste de listener de loopback anterior não foi repetido.
+
+Preparação e primeira prova local estão concluídas. Typecheck completo, entradas não confiáveis e importação Workbench permanecem false no resumo. O menor próximo passo usa o arquivo existente em **Projetos → Importar REA local**, projeto `ofelipepeixoto/security-workbench`/ID `1419403320`, commit da fixture `1b0c93114d7a215aa73844e5a7edd62620dd25eb`. Não executar o motor novamente nem usar o commit REA como commit do alvo. O parser publicado foi reconferido como idêntico ao PR #27; somente o upload efetivo poderá comprovar aceitação/persistência dos bytes. Conferir a análise após recarga e o Markdown; em resposta incerta, consultar histórico antes de reenviar. O raw JSON continua privado e não é persistido pelo importador.

@@ -74,6 +74,10 @@ Get-Command node, docker, wsl -ErrorAction SilentlyContinue | Select-Object Name
 if (Get-Command docker -ErrorAction SilentlyContinue) { docker version } else { Write-Output "Docker não disponível; nenhuma instalação foi iniciada." }
 ```
 
-Somente se já estiverem instalados, consultar `docker version` e `wsl --status`. Não enviar credenciais, variáveis de ambiente, cookies ou fontes privadas no diagnóstico. WSL sozinho não garante isolamento de rede.
+Somente se já estiverem instalados, consultar `docker version` e `wsl --status`. Em Windows sem WSL instalado, a presença de `wsl.exe` não comprova instalação e os comandos podem abrir o instalador; não os tratar como diagnóstico sem efeitos em todas as versões. Não enviar credenciais, variáveis de ambiente, cookies ou fontes privadas. WSL sozinho não garante isolamento de rede.
+
+O operador confirmou nesta conversa Windows/PowerShell, Node **24.19.0**, Docker ausente e, depois do prompt do Windows, instalação concluída do WSL **3.0.3**, e instalação bem-sucedida do Ubuntu informada pelo operador. O primeiro provisionamento está criando a conta Unix local; a saída final `wsl --list --verbose` ainda é necessária para conferir WSL 2. O Ubuntu usa uma VM leve gerenciada no Windows, sem inicialização dupla; isso prepara ferramentas Linux e não comprova sandbox. [Instalação oficial](https://learn.microsoft.com/pt-br/windows/wsl/install) e [arquitetura WSL 2](https://learn.microsoft.com/pt-br/windows/wsl/compare-versions).
+
+Após instalar a distribuição, conferir `wsl --list --verbose`. Somente usando o nome exato retornado e uma distribuição existente, consultar `wsl --distribution NOME --exec uname -r` e `wsl --distribution NOME --exec sh -lc 'command -v node bwrap unshare timeout'`. Esses resultados orientarão o isolamento; não iniciar o REA nem presumir que o Node Windows esteja disponível no Linux.
 
 O próximo aceite de execução exige um mecanismo realmente disponível com rede desabilitada e entrada JS somente leitura, runtime REA fixado e rastreável, limites externos de bytes/tempo/memória e prova de que fixture com efeitos sentinela não escreve nem se conecta. Só então executar uma fixture benigna e uma adversarial com o REA real, preservar versão/digests/limites/horários, comparar a projeção com o resultado nativo e registrar custos observados. Essa prova permanece pendente.

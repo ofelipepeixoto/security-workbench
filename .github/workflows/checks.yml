@@ -75,7 +75,16 @@ jobs:
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: '24'
-      - name: Testes do adaptador web
-        run: node --test web/tests/*.test.mjs
+      # A suíte completa, incluindo SSR/React, roda em web-build após instalar
+      # o lockfile. Este job preserva o smoke do núcleo sem dependências npm.
+      - name: Testes do scanner e autorização sem dependências npm
+        run: >-
+          node --test
+          web/tests/scanner.test.mjs
+          web/tests/service.test.mjs
+          web/tests/rea-import.test.mjs
+          web/tests/github-auth.test.mjs
+          web/tests/github-owner-integration.test.mjs
+          web/tests/workbench-access.test.mjs
       - name: Leitura real pública do REA autorizado
         run: node web/tests/live-smoke.mjs

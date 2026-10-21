@@ -76,6 +76,8 @@ def connect(state: Path) -> sqlite3.Connection:
         connection.execute("ALTER TABLE runs ADD COLUMN source TEXT NOT NULL DEFAULT 'local'")
     if "verified_revision" not in columns:
         connection.execute("ALTER TABLE runs ADD COLUMN verified_revision INTEGER NOT NULL DEFAULT 0")
+    if "provenance" not in columns:
+        connection.execute("ALTER TABLE runs ADD COLUMN provenance TEXT NOT NULL DEFAULT '{}'")
     for table in ("scope", "runs"):
         columns = {row[1] for row in connection.execute(f"PRAGMA table_info({table})")}
         if "repository_id" not in columns:
@@ -111,19 +113,20 @@ def require_scope(db: sqlite3.Connection, repo: str) -> str:
 
 def save_run(db: sqlite3.Connection, repo: str, revision: str, result: dict, *, source: str = "local", verified_revision: bool = False) -> str:
     repo = require_scope(db, repo)
-    if source not in {"local", "github"} or (verified_revision and source != "github"):
+    if source not in {"local", "github", "rea-import"} or (verified_revision and source != "github"):
         raise ValueError("Origem ou verificação inválida.")
     repository_id = None
-    if source == "github":
+    if source in {"github", "rea-import"}:
         repository_id = validate_repository_id(result.get("repository_id"))
         if scoped_repository_id(db, repo) != repository_id:
             raise ValueError("Identidade da evidência divergente do escopo.")
     run_id = uuid.uuid4().hex[:16]
     with db:
-        db.execute("INSERT INTO runs (id, repo, revision, digest, created_at, partial, files_read, bytes_read, omissions, source, verified_revision, repository_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (
+        db.execute("INSERT INTO runs (id, repo, revision, digest, created_at, partial, files_read, bytes_read, omissions, source, verified_revision, repository_id, provenance) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (
             run_id, repo, revision, result["snapshot_digest"],
             datetime.now(timezone.utc).isoformat(), int(result["partial"]),
             result["files_read"], result["bytes_read"], json.dumps(result["omissions"]), source, int(verified_revision), repository_id,
+            json.dumps(result.get("provenance", {}) if source == "rea-import" else {}),
         ))
         for item in result["findings"]:
             db.execute("INSERT OR IGNORE INTO findings VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (
@@ -144,6 +147,7 @@ def get_run(db: sqlite3.Connection, run_id: str) -> dict:
         raise ValueError("Análise não encontrada.")
     result = dict(row)
     result["omissions"] = json.loads(result["omissions"])
+    result["provenance"] = json.loads(result["provenance"])
     result["findings"] = [dict(x) for x in db.execute(
         "SELECT * FROM findings WHERE run_id = ? ORDER BY path, line", (run_id,)
     )]
@@ -169,6 +173,8 @@ def compare(db: sqlite3.Connection, before: str, after: str) -> dict:
     left, right = get_run(db, before), get_run(db, after)
     if left["repo"] != right["repo"] or left["repository_id"] != right["repository_id"]:
         raise ValueError("Compare apenas análises do mesmo repositório.")
+    if "rea-import" in {left["source"], right["source"]} and left["source"] != right["source"]:
+        raise ValueError("Compare a importação REA somente com outra importação do mesmo analisador.")
     older = {item["fingerprint"] for item in left["findings"]}
     newer = {item["fingerprint"] for item in right["findings"]}
     return {"repo": left["repo"], "new": sorted(newer - older), "no_longer_detected": sorted(older - newer), "still_detected": sorted(older & newer), "partial": bool(left["partial"] or right["partial"])}

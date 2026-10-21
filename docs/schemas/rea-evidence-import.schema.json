@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:security-workbench:rea-evidence-import:v1",
+  "title": "REA Evidence — subconjunto estático aceito pelo Workbench",
+  "description": "Não substitui o schema integral do REA nem autentica seus digests. O parser também exige JSON UTF-8 de até 1048576 bytes, sem chaves duplicadas, profundidade <=32, <=25000 valores, strings <=16384, <=2000 observações totais e checagens cruzadas de identidade. Campos adicionais nativos são ignorados e não persistidos.",
+  "type": "object",
+  "required": ["evidence_id", "provider", "operation", "predicate_type", "authority", "confidence", "subject", "normalized_result"],
+  "properties": {
+    "evidence_id": {"type": "string", "pattern": "^ev_[a-f0-9]{64}$"},
+    "provider": {
+      "type": "object", "required": ["id", "version"],
+      "properties": {"id": {"const": "rea-javascript-application"}, "version": {"const": "1"}}
+    },
+    "operation": {"const": "analyze_javascript_application"},
+    "predicate_type": {"const": "rea.javascript-application-analysis"},
+    "authority": {"const": "shipped-artifact"},
+    "confidence": {"const": "derived"},
+    "subject": {
+      "type": "object", "required": ["digest", "format"],
+      "properties": {
+        "digest": {"type": "object", "required": ["sha256"], "properties": {"sha256": {"$ref": "#/$defs/sha256"}}},
+        "format": {"enum": ["directory", "asar"]}
+      }
+    },
+    "normalized_result": {
+      "type": "object", "required": ["root_artifact_sha256", "format", "statistics", "graph"],
+      "properties": {
+        "root_artifact_sha256": {"$ref": "#/$defs/sha256"},
+        "format": {"enum": ["directory", "asar"]},
+        "statistics": {
+          "type": "object", "required": ["relevant_files", "parsed_javascript_files", "parse_failures", "text_bytes_read", "findings"],
+          "properties": {
+            "relevant_files": {"type": "integer", "minimum": 0, "maximum": 5000},
+            "parsed_javascript_files": {"type": "integer", "minimum": 0, "maximum": 5000},
+            "parse_failures": {"type": "integer", "minimum": 0, "maximum": 5000},
+            "text_bytes_read": {"type": "integer", "minimum": 0, "maximum": 26214400},
+            "findings": {"type": "integer", "minimum": 0, "maximum": 1000000}
+          }
+        },
+        "graph": {
+          "type": "object", "required": ["schema", "coverage", "root_node_ids", "nodes"],
+          "properties": {
+            "schema": {"const": "JavaScriptApplicationGraph"},
+            "coverage": {"$ref": "#/$defs/coverage"},
+            "root_node_ids": {"type": "array", "minItems": 1, "maxItems": 32, "items": {"type": "string", "pattern": "^jag_node_[a-f0-9]{64}$"}},
+            "nodes": {
+              "type": "array", "minItems": 1, "maxItems": 1000,
+              "items": {
+                "type": "object", "required": ["node_id", "observations"],
+                "properties": {
+                  "node_id": {"type": "string", "pattern": "^jag_node_[a-f0-9]{64}$"},
+                  "observations": {"type": "array", "minItems": 1, "maxItems": 2000, "items": {"type": "object"}}
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "coverage": {
+      "type": "object", "required": ["status", "truncated", "omitted_count", "limits"],
+      "properties": {
+        "status": {"enum": ["complete", "partial", "unknown", "unavailable"]},
+        "truncated": {"type": "boolean"},
+        "omitted_count": {"type": ["integer", "null"], "minimum": 0, "maximum": 9007199254740991},
+        "limits": {
+          "type": "array", "maxItems": 32,
+          "items": {
+            "type": "object", "required": ["name", "value", "unit"],
+            "properties": {
+              "name": {"type": "string", "minLength": 1, "maxLength": 100},
+              "value": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+              "unit": {"enum": ["items", "bytes", "milliseconds", "depth", "characters", "instructions", "other"]}
+            }
+          }
+        }
+      }
+    }
+  }
+}

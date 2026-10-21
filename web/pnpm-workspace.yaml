@@ -25,3 +25,5 @@ overrides:
   fast-uri@3.1.7: 3.1.8
   fflate@0.7.4: 0.7.5
   image-size@2.0.2: 2.0.3
+  undici@7.24.8: 7.29.1
+  ws@8.18.0: 8.21.3

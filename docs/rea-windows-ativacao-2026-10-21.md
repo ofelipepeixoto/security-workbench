@@ -161,6 +161,87 @@ Primeiro instalar somente as ferramentas de compilação e dependências normais
 )
 ~~~
 
-Esse comando ainda não tem resultado do operador. Fonte baixada/conferida, compilação, instalação no prefix privado e teste do novo executável continuam pendentes. Se AppArmor ou namespaces recusarem o executável privado, registrar o bloqueio sem desabilitar a proteção ou recorrer silenciosamente ao binário antigo.
+O operador forneceu saída com `FERRAMENTAS_BWRAP_OK`: GCC 15.2.0, Python 3.14.4, Meson 1.10.1, Ninja 1.13.2 e libcap 2.75. APT instalou 44 pacotes e atualizou cinco, sem remoções; 126 permaneceram não atualizados. Foram obtidos 86,6 MB e APT previu 277 MB adicionais de disco, sem medição posterior do espaço usado. As atualizações necessárias incluíram libc6, libc-bin, libc-gconv-modules-extra, locales e libbz2-1.0; não foi um upgrade global. O Python observado atende à preparação Meson, sem homologar o núcleo Workbench que declara Python 3.12.
+
+A engenharia baixou separadamente o tarball oficial para inspeção em memória: 129472 bytes, SHA-256 publicado conferido, diretório raiz `bubblewrap-0.13.1` e arquivo Meson presente. Não houve extração, compilação ou execução do fonte nessa inspeção. O download/conferência local do operador, build, instalação no prefix privado e teste do executável continuam pendentes. Se AppArmor ou namespaces recusarem o executável privado, registrar o bloqueio sem desabilitar a proteção ou recorrer silenciosamente ao binário antigo.
 
 `runPreflight` aceita, somente para chamada por módulo local confiável, `bwrapExecutable` com caminho absoluto POSIX sem NUL. O padrão continua `/usr/bin/bwrap`; disponibilidade e processo usam o mesmo caminho selecionado, sem seleção por PATH/ambiente nem fallback. A CLI continua sem argumentos e não recebe código ou caminhos de alvo. O invólucro local deverá apontar explicitamente para o executável conferido e imprimir somente o JSON projetado; `memory_enforced` e `ready_for_rea` continuam false.
+
+## Build privado do Bubblewrap — proposto, ainda não executado pelo operador
+
+O bloco preserva diretórios existentes: se os dois caminhos dedicados já existirem, para sem apagá-los. O download usa somente HTTPS, configuração curl desativada e hash fixado antes de extrair. Não requer sudo. O bootstrap usa o Bubblewrap do sistema somente para compilar fonte confiável, com destinos fixos e nenhum destino criado sob o fonte montado. A condição da CVE de setup não foi identificada nesse layout; isso não aceita o binário antigo para usos arbitrários nem substitui o pré-flight posterior do novo executável.
+
+Durante Meson/Ninja a rede fica em namespace separado, fonte e `/usr` somente leitura, somente build/prefix próprios graváveis e temporários privados. `--wrap-mode=nodownload` impede obtenção de subprojetos. A unidade solicita 2 GiB, swap zero, 64 tarefas, uma CPU e 180 segundos, com encerramento da família; são limites configurados para build, não consumo medido ou prova do executor REA. Selinux permanece auto, sem instalar dependência opcional antecipadamente. Prefix `/output` corresponde ao diretório privado montado e não exige gravar no sistema. A suíte de testes upstream está desativada e a execução de `--version` não comprova os controles de isolamento.
+
+~~~bash
+(
+  set -eu
+  umask 077
+  rea_base="$HOME/.local/share/security-workbench"
+  rea_bwrap_work="$rea_base/bubblewrap-build-0.13.1"
+  rea_bwrap_prefix="$rea_base/bubblewrap-0.13.1"
+
+  test ! -e "$rea_bwrap_work"
+  test ! -e "$rea_bwrap_prefix"
+  mkdir "$rea_bwrap_work" "$rea_bwrap_prefix"
+  cd "$rea_bwrap_work"
+
+  curl --disable --fail --location \
+    --proto '=https' --proto-redir '=https' --tlsv1.2 \
+    --max-time 60 --max-filesize 1048576 \
+    --output bubblewrap-0.13.1.tar.xz \
+    https://github.com/containers/bubblewrap/releases/download/v0.13.1/bubblewrap-0.13.1.tar.xz
+
+  printf '%s  %s\n' \
+    '0e85c8702248b8dd64144f594147553650cdd0e4c951690345faace79c217c4d' \
+    'bubblewrap-0.13.1.tar.xz' | sha256sum --check -
+
+  tar --extract --xz --file bubblewrap-0.13.1.tar.xz \
+    --no-same-owner --no-same-permissions
+  test -f bubblewrap-0.13.1/meson.build
+  mkdir build
+
+  systemd-run --user --quiet --wait --pipe --collect \
+    --expand-environment=no \
+    --unit=workbench-bwrap-build-0131 \
+    -p MemoryMax=2G -p MemorySwapMax=0 \
+    -p TasksMax=64 -p CPUQuota=100% \
+    -p RuntimeMaxSec=180s -p TimeoutStopSec=2s \
+    -p KillMode=control-group -p UMask=0077 \
+    -p NoNewPrivileges=yes \
+    /usr/bin/env -i PATH=/usr/bin:/bin LANG=C \
+    /usr/bin/bwrap \
+    --unshare-user --unshare-net --unshare-pid --unshare-ipc --unshare-uts \
+    --die-with-parent --new-session --clearenv --cap-drop ALL \
+    --ro-bind /usr /usr \
+    --symlink usr/bin /bin --symlink usr/lib /lib \
+    --symlink usr/lib64 /lib64 \
+    --ro-bind "$rea_bwrap_work/bubblewrap-0.13.1" /source \
+    --bind "$rea_bwrap_work/build" /build \
+    --bind "$rea_bwrap_prefix" /output \
+    --proc /proc --dev /dev --tmpfs /tmp \
+    --dir /tmp/home \
+    --setenv HOME /tmp/home --setenv TMPDIR /tmp \
+    --setenv PATH /usr/bin:/bin --setenv LANG C \
+    --chdir /build \
+    /bin/sh -eu -c '
+      meson setup /build /source --prefix=/output \
+        --buildtype=release --wrap-mode=nodownload \
+        -Dman=disabled -Dbash_completion=disabled \
+        -Dzsh_completion=disabled -Dtests=false
+      ninja -C /build -j 2
+      meson install -C /build --no-rebuild
+    ' </dev/null
+
+  test -x "$rea_bwrap_prefix/bin/bwrap"
+  test ! -u "$rea_bwrap_prefix/bin/bwrap"
+  test ! -g "$rea_bwrap_prefix/bin/bwrap"
+  test "$("$rea_bwrap_prefix/bin/bwrap" --version)" = 'bubblewrap 0.13.1'
+  "$rea_bwrap_prefix/bin/bwrap" --version
+  printf 'binario_sha256='
+  sha256sum < "$rea_bwrap_prefix/bin/bwrap"
+  printf 'BWRAP_COMPILADO_OK\n'
+)
+~~~
+
+Somente após resultado observado, executar a fixture própria pelo módulo do helper selecionando exatamente esse binário. Não usar o hash do tarball como se fosse o hash do executável compilado; o segundo digest será calculado localmente pelo bloco. Nenhuma análise REA é iniciada por esse build.

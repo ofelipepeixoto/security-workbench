@@ -1,6 +1,10 @@
 # Site público e área de trabalho protegida — 17/10/2026
 
-## Resultado e operação
+## Atualização em revisão — 21/10/2026
+
+Este documento registra a publicação de 17/10/2026. O Site continua em v10; os fatos abaixo não são testes repetidos nesta data. A nova branch exige **somente GitHub** na operação real, sem fallback ChatGPT. Backend e testes locais estão no [PR #20](https://github.com/ofelipepeixoto/security-workbench/pull/20); cadastro OAuth, variáveis, migração e homologação de cookies/callback ainda dependem de configuração e deploy autorizados. Consulte o [guia atual](autenticacao-github.md) e a [auditoria](auditoria-2026-10-21.md).
+
+## Resultado e operação em 17/10/2026
 
 A versão inicial foi privada. Após autorização para tornar o Site público, visitantes anônimos podem navegar na demonstração fictícia sem login. A operação real continua vinculada à identidade ChatGPT do proprietário: link do repositório → conferir identidade/confirmar escopo → analisar versão atual → revisar candidatos → relatório/histórico/comparação. SHA específico fica em opção avançada.
 

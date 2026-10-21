@@ -1,6 +1,6 @@
 # Login GitHub do proprietário — preparação para homologação
 
-Estado em 21/10/2026: implementação em branch de revisão, desabilitada por padrão. **Não homologada com o GitHub real nem publicada.** A versão 10 do Site continua com o código anterior. Esta mudança depende da fronteira de proprietário do PR #17; as correções de dependências #18/#19 continuam separadas e são gates antes de produção.
+Estado em 21/10/2026: código publicado no Site v12 após autorização, incluindo a fronteira do PR #17 e as correções #18/#19; PRs GitHub continuam sem merge. **Login GitHub real ainda não homologado e desabilitado.** OAuth App cadastrada; Client Secret e associação ao owner existente pendentes. Consulte o [registro da publicação](publicacao-2026-10-21.md).
 
 ## Escolha e limites
 
@@ -26,7 +26,7 @@ Revogar a autorização na conta GitHub impede novas trocas, mas não encerra im
 
 ## Configuração restante — pelo proprietário, fora do chat
 
-Nenhuma variável de ambiente foi modificada nesta etapa. A consulta somente de nomes no ambiente de produção retornou zero entradas expostas pelo conector. Isso não inspeciona segredos internos da plataforma nem comprova ausência de identidade nativa.
+Na preparação do PR #20, o conector retornou zero variáveis. Na publicação autorizada, a revisão 1 configurou origem, Client ID, GitHub ID e flag false. Client Secret e WORKBENCH_OWNER_ID permanecem ausentes; nenhum valor secreto foi incluído em código ou logs. O roteiro abaixo continua como critérios para ativação, sem afirmar que todos foram concluídos.
 
 1. Revisar os PRs e combinar a base #17 com as correções #18/#19 antes de preparar um deploy autorizado. Ainda não fazer merge/publicação sem autorização específica.
 2. Em GitHub → Settings → Developer settings → OAuth Apps, cadastrar **uma App dedicada ao login**. Homepage: `https://security-workbench.camaleaoweb3.com.br`. Authorization callback URL: `https://security-workbench.camaleaoweb3.com.br/api/auth/github/callback`. Não pedir escopo `repo`, organizações ou escrita. Para homologação em outro domínio HTTPS, usar outra App/callback e outra configuração canônica; não usar HTTP do preview para login real.
@@ -43,7 +43,7 @@ Nenhuma variável de ambiente foi modificada nesta etapa. A consulta somente de 
 
 4. Confirmar que a hospedagem encaminha cookies `__Host-`, múltiplos Set-Cookie e as três rotas OAuth sem exigir sessão ChatGPT prévia. Sites oferece identidade ChatGPT nativa; a compatibilidade do provedor externo **precisa de prova hospedada**. Se a plataforma interceptar rotas/cookies ou exigir ChatGPT antes do fluxo, manter GitHub desabilitado e documentar o bloqueio. Não oferecer outro provedor nem contornar controles. Uma alternativa de hospedagem compatível dependerá de projeto e autorização próprios.
 5. Após autorização de deploy, o pipeline deve aplicar a migração aditiva `0001_strong_swarm.sql` no D1 **correto** usando o fluxo oficial de deploy do projeto. São duas tabelas de autenticação; a tabela de projetos não é reescrita. Backup/restore devem ser privados e aprovados. O teste SQLite em memória não equivale à migração de produção. Não apontar o Worker ao SQLite local nem executar SQL contra bancos de terceiros.
-6. Habilitar a flag somente quando configuração, associação, migração, dependências e tratamento de abuso estiverem revisados. Nenhum desses passos foi executado em produção nesta entrega.
+6. Habilitar a flag somente quando configuração, associação, migração, dependências e tratamento de abuso estiverem revisados. O cadastro OAuth e a publicação do código com flag false foram executados; a ativação e a homologação real permanecem pendentes conforme o registro de publicação.
 
 ## Roteiro de homologação real
 

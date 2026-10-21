@@ -1,0 +1,26 @@
+{
+  "at": "2026-10-21T19:58:32.101266+00:00",
+  "checks": [
+    {
+      "path": "/api/workbench",
+      "method": "GET",
+      "status": 401,
+      "cache": "no-store",
+      "body": "{\"error\":\"Entre para acessar o Workbench.\"}"
+    },
+    {
+      "path": "/api/workbench",
+      "method": "POST",
+      "status": 401,
+      "cache": "no-store",
+      "body": "{\"error\":\"Entre para acessar o Workbench.\"}"
+    },
+    {
+      "path": "/api/auth/github/start",
+      "method": "GET",
+      "status": 503,
+      "cache": "no-store",
+      "body": "{\"error\":\"Login GitHub indisponível. Confira a configuração do servidor.\"}"
+    }
+  ]
+}

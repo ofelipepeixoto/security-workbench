@@ -1,35 +1,39 @@
-# Operação individual na área pública
+# Operação individual — GitHub exclusivo em revisão
 
-Refs #14. A demonstração continua pública e fictícia. A operação real exige
-identidade ChatGPT **e** correspondência exata com `WORKBENCH_OWNER_ID`, configurado
-somente no servidor. Um usuário autenticado diferente recebe 403 antes de consultar
-D1 ou GitHub; ausência de configuração retorna 503. Sem identidade retorna 401.
-Os filtros por proprietário nas consultas continuam necessários.
+Refs #14 e [PR #20](https://github.com/ofelipepeixoto/security-workbench/pull/20).
+A demonstração continua pública e fictícia. Nesta branch, a operação real exige
+sessão GitHub validada no servidor e correspondência ao owner configurado.
+Não há fallback por ChatGPT, e-mail, username ou cadastro inicial. O Site v10
+continua inalterado; esta autenticação ainda não está homologada na hospedagem.
 
-## Preparação e publicação (pendentes de revisão humana)
+## Preparação e publicação
 
-1. Conferir a identidade do proprietário numa sessão legítima deste mesmo Site.
-   Sites fornece um ID estável por Site; ele **não é** o ID da conta do painel Sites,
-   um e-mail, o login GitHub ou o ID de outro Site. Não inferir esses equivalentes.
-2. Configurar `WORKBENCH_OWNER_ID` com esse ID no gerenciador de variáveis de runtime
-   do Site, sem colocar o valor em fonte, chat, logs ou manifesto. Se usar histórico
-   D1 para reconciliar a identidade, confirmar a origem e a conta antes de vincular;
-   não eleger automaticamente o primeiro cadastro como proprietário.
-3. Publicar apenas após revisão, com a variável preparada na mesma entrega.
-   A fonte Sites é separada do GitHub: portar a mudança revisada, verificar testes,
-   TypeScript/build e registrar o commit e a versão realmente publicados.
-4. Validar proprietário, outro usuário autenticado e anônimo; testar GET e ações
-   de revisão/relatório. Confirmar persistência do histórico existente.
+1. Ler o [guia de autenticação](autenticacao-github.md), incluindo variáveis,
+   callback exato, migração D1, limites, retenção e reversão.
+2. Reconciliar `WORKBENCH_OWNER_ID` com os dados existentes e com a identidade
+   legítima deste Site. Esse ID não é o ID da conta do painel Sites, e-mail,
+   username GitHub ou ID de outro Site. Ele é preservado como chave dos dados,
+   sem tornar a identidade nativa um segundo método de entrada.
+3. Configurar uma OAuth App dedicada e verificar o ID numérico `GITHUB_OWNER_ID`.
+   Nunca eleger automaticamente o primeiro login como administrador nem copiar
+   segredos para fonte/chat/log. Manter a flag desabilitada até revisão.
+4. Após autorização específica de deploy, confirmar encaminhamento de cookies
+   e callback sem sessão ChatGPT prévia, migração correta e dependências #18/#19.
+   A fonte Sites é separada do GitHub: registrar o commit e versão publicados.
+5. Homologar GitHub proprietário, outra conta, anônimo, expiração e logout;
+   concluir revisão persistida, comparação e download reais do issue #14.
 
-O link "Entrar como proprietário" abre a autenticação oficial em navegação de topo.
-Ele não concede autorização por si só. Usuários sem autorização veem a demonstração.
-Não existem cadastro público, migração de dados ou credenciais novas neste PR.
+Conta GitHub não autorizada é recusada no callback e não recebe sessão operacional.
+Sem sessão aceita, a API responde 401. O gate adicional do serviço preserva
+503 quando owner não está configurado e 403 para identidade diferente antes de
+ler projetos. A resolução de sessão pode consultar somente as tabelas de autenticação.
+Consultas de projetos/análises continuam filtradas pelo owner canônico.
 
 ## Validação e reversão
 
-`node --test web/tests/*.test.mjs` cobre recusa de outro usuário em todas as ações,
-configuração ausente, tentativa de fornecer proprietário no corpo e acesso legítimo.
-Executar também Python, TypeScript e build. Estes testes não substituem a homologação
-hospedada após publicação. Antes de publicar, a reversão é fechar o PR. Após publicar,
-priorizar corrigir a variável ou suspender somente a operação real, mantendo a demo;
-não remover o bloqueio de autorização para recuperar disponibilidade.
+Os testes Node incluem OAuth com respostas simuladas, SQLite em memória,
+seleção exclusiva de identidade, isolamento, revogação e dados existentes.
+Python, TypeScript e build também devem passar. Não equivalem à homologação hospedada.
+Antes de publicar, basta não incorporar o PR. Após futuro deploy autorizado,
+desabilitar a flag/suspender a operação e restaurar artefato aprovado; não remover
+o gate de proprietário nem reintroduzir outro provedor automaticamente.

@@ -1,10 +1,15 @@
 import * as defaultScanner from './scanner.mjs';
+import { parseReaEvidence } from './rea-import.mjs';
 
 const MAX_BODY_BYTES = 8192;
+const MAX_REA_BODY_BYTES = 2 * 1024 * 1024 + MAX_BODY_BYTES;
+const BODY_TIMEOUT_MS = 10000;
 const STALE_MS = 120000;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHA = /^[0-9a-f]{40}$/i;
 const DECISIONS = new Set(['candidate', 'confirmed', 'false_positive', 'accepted_risk']);
+const FINDING_RUN_LIMIT = 20;
+const FINDING_ROW_LIMIT = 500;
 
 export class WorkbenchError extends Error {
   constructor(message, status = 400) { super(message); this.status = status; }
@@ -19,24 +24,35 @@ function response(data, status = 200) {
   return Response.json(data, { status, headers: { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } });
 }
 
-async function parseBody(request) {
+async function parseBody(request, maxBytes = MAX_BODY_BYTES) {
   if (request.headers.get('Origin') !== new URL(request.url).origin) throw new WorkbenchError('Origem da solicitação não permitida.', 403);
   if (request.headers.get('Content-Type')?.split(';')[0].trim().toLowerCase() !== 'application/json') throw new WorkbenchError('Envie os dados em JSON.', 415);
   const contentLength = request.headers.get('Content-Length');
-  if (contentLength !== null && (!/^\d+$/.test(contentLength) || Number(contentLength) > MAX_BODY_BYTES)) throw new WorkbenchError('Solicitação maior que o limite permitido.', 413);
+  if (contentLength !== null && (!/^\d+$/.test(contentLength) || Number(contentLength) > maxBytes)) throw new WorkbenchError('Solicitação maior que o limite permitido.', 413);
   const reader = request.body?.getReader();
   if (!reader) throw new WorkbenchError('Solicitação vazia.');
   let length = 0;
   const chunks = [];
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    length += value.byteLength;
-    if (length > MAX_BODY_BYTES) {
-      await reader.cancel();
-      throw new WorkbenchError('Solicitação maior que o limite permitido.', 413);
+  let timer;
+  const deadline = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new WorkbenchError('Tempo de envio excedido. Tente novamente.', 408)), BODY_TIMEOUT_MS);
+  });
+  try {
+    while (true) {
+      const { value, done } = await Promise.race([reader.read(), deadline]);
+      if (done) break;
+      length += value.byteLength;
+      if (length > maxBytes) throw new WorkbenchError('Solicitação maior que o limite permitido.', 413);
+      chunks.push(value);
     }
-    chunks.push(value);
+  } catch (error) {
+    // Cancellation is cleanup, not part of the response deadline. An untrusted
+    // stream can leave its cancel promise pending forever or reject it.
+    try { reader.cancel().catch(() => {}); } catch { /* best effort */ }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    reader.releaseLock();
   }
   const bytes = new Uint8Array(length);
   let offset = 0;
@@ -49,7 +65,8 @@ async function parseBody(request) {
 }
 
 function publicProject(row) {
-  return { id: row.id, repo: row.repo, repository_id: row.repository_id, authorized_at: row.authorized_at };
+  return { id: row.id, repo: row.repo, repository_id: row.repository_id, authorized_at: row.authorized_at,
+    ...(row.has_runs === undefined ? {} : { has_runs: Boolean(row.has_runs) }) };
 }
 
 function validateMetadata(metadata, repo, expectedId) {
@@ -65,7 +82,11 @@ export function createWorkbenchService({ db, ownerId, scanner = defaultScanner, 
   const stamp = () => now().toISOString();
   const first = (query, ...args) => db.prepare(query).bind(...args).first();
   const all = async (query, ...args) => (await db.prepare(query).bind(...args).all()).results;
-  const write = (query, ...args) => db.prepare(query).bind(...args).run();
+  const write = async (query, ...args) => {
+    const saved = await db.prepare(query).bind(...args).run();
+    if (saved?.success !== true) throw new WorkbenchError('O armazenamento não confirmou a operação. Confira o histórico antes de tentar novamente.', 503);
+    return saved;
+  };
   const project = async (id) => {
     const row = await first('SELECT * FROM workbench_projects WHERE owner_id = ? AND id = ?', ownerId, identifier(id));
     if (!row) throw new WorkbenchError('Projeto não encontrado.', 404);
@@ -100,15 +121,73 @@ export function createWorkbenchService({ db, ownerId, scanner = defaultScanner, 
   };
   return {
     async list() {
-      const projects = await all('SELECT * FROM workbench_projects WHERE owner_id = ? ORDER BY authorized_at DESC LIMIT 100', ownerId);
+      const projects = await all('SELECT p.*, EXISTS(SELECT 1 FROM workbench_runs r WHERE r.owner_id = p.owner_id AND r.project_id = p.id) AS has_runs FROM workbench_projects p WHERE p.owner_id = ? ORDER BY p.authorized_at DESC LIMIT 100', ownerId);
       const rows = await all('SELECT * FROM workbench_runs WHERE owner_id = ? ORDER BY created_at DESC LIMIT 100', ownerId);
       return { projects: projects.map(publicProject), runs: rows.map(row => {
         const result = row.result_json ? JSON.parse(row.result_json) : null;
-        return { id: row.id, project_id: row.project_id, repo: row.repo, status: row.status, revision: row.revision, files_read: result?.files_read ?? null, findings_count: result?.findings?.length ?? null, created_at: row.created_at, partial: result?.partial ?? null, failure_code: row.failure_code };
+        return { id: row.id, project_id: row.project_id, repo: row.repo, status: row.status, revision: row.revision, files_read: result?.files_read ?? null, findings_count: result?.findings?.length ?? null, created_at: row.created_at, partial: result?.partial ?? null, failure_code: row.failure_code, source: result?.source ?? 'github-public' };
       }) };
     },
     async act(payload) {
       switch (payload.action) {
+        case 'import-rea': {
+          const scope = await project(payload.projectId);
+          const requestId = identifier(payload.requestId);
+          if (typeof payload.revision !== 'string' || !SHA.test(payload.revision)) throw new WorkbenchError('Informe o SHA completo do commit declarado.');
+          if (typeof payload.evidence !== 'string') throw new WorkbenchError('Envie o arquivo JSON Evidence do REA.');
+          let imported;
+          try { imported = await parseReaEvidence(new TextEncoder().encode(payload.evidence)); }
+          catch { throw new WorkbenchError('Evidence REA inválido ou fora dos limites de importação.'); }
+          const revision = payload.revision.toLowerCase();
+          const reuse = async previous => {
+            const saved = previous.result_json ? JSON.parse(previous.result_json) : null;
+            if (previous.project_id !== scope.id || previous.requested_revision !== revision || saved?.source !== 'rea-import' || saved?.provenance?.report_sha256 !== imported.provenance.report_sha256) {
+              throw new WorkbenchError('Esta solicitação já foi usada para outro resultado.', 409);
+            }
+            return { run: await fullRun(previous) };
+          };
+          const previous = await first('SELECT * FROM workbench_runs WHERE owner_id = ? AND request_id = ?', ownerId, requestId);
+          if (previous) return reuse(previous);
+          const id = uuid(), created = stamp();
+          // Only the validated projection is persisted; never the uploaded report.
+          const stored = { ...imported, revision, repository_id: scope.repository_id,
+            source: 'rea-import', verified_revision: false };
+          try {
+            await write("INSERT INTO workbench_runs (id, owner_id, project_id, repo, repository_id, request_id, requested_revision, revision, status, result_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'complete', ?, ?, ?)",
+              id, ownerId, scope.id, scope.repo, scope.repository_id, requestId, revision, revision, JSON.stringify(stored), created, created);
+          } catch (error) {
+            // A concurrent retry may have committed first. Recheck the full
+            // import identity before returning that run; unrelated writes and
+            // conflicting content must never be reported as this import.
+            let repeated;
+            try { repeated = await first('SELECT * FROM workbench_runs WHERE owner_id = ? AND request_id = ?', ownerId, requestId); }
+            catch { throw new WorkbenchError('Não foi possível confirmar a importação. Confira o histórico antes de tentar novamente.', 503); }
+            if (repeated) return reuse(repeated);
+            if (error instanceof WorkbenchError) throw error;
+            throw new WorkbenchError('Não foi possível persistir a importação. Confira o histórico antes de tentar novamente.', 503);
+          }
+          return { run: await fullRun(await runRow(id)) };
+        }
+        case 'findings': {
+          // A bounded historical view, not a count of unique vulnerabilities.
+          // Every query remains scoped to the server-resolved owner.
+          const rows = await all("SELECT * FROM workbench_runs WHERE owner_id = ? AND status = 'complete' ORDER BY created_at DESC, id DESC LIMIT ?", ownerId, FINDING_RUN_LIMIT + 1);
+          const selected = rows.slice(0, FINDING_RUN_LIMIT);
+          const findings = [];
+          let total = 0;
+          for (const row of selected) {
+            const run = await fullRun(row);
+            total += run.findings.length;
+            for (const finding of run.findings) {
+              if (findings.length >= FINDING_ROW_LIMIT) break;
+              findings.push({ ...finding, run_id: row.id, project_id: row.project_id, repo: row.repo,
+                revision: row.revision, created_at: row.created_at, source: run.source ?? 'github-public' });
+            }
+          }
+          return { findings, runs_considered: selected.length,
+            truncated: rows.length > FINDING_RUN_LIMIT || total > FINDING_ROW_LIMIT,
+            limits: { runs: FINDING_RUN_LIMIT, findings: FINDING_ROW_LIMIT } };
+        }
         case 'inspect': {
           let repo;
           try { repo = scanner.normalizeRepo(payload.repo); }
@@ -148,7 +227,8 @@ export function createWorkbenchService({ db, ownerId, scanner = defaultScanner, 
           await expire(scope.id);
           const previous = await first('SELECT * FROM workbench_runs WHERE owner_id = ? AND request_id = ?', ownerId, requestId);
           if (previous) {
-            if (previous.project_id !== scope.id || previous.requested_revision !== requestedRevision) throw new WorkbenchError('Esta solicitação já foi usada para outra análise.', 409);
+            const previousSource = previous.result_json ? JSON.parse(previous.result_json).source ?? 'github-public' : 'github-public';
+            if (previous.project_id !== scope.id || previous.requested_revision !== requestedRevision || previousSource !== 'github-public') throw new WorkbenchError('Esta solicitação já foi usada para outra análise.', 409);
             return { run: await fullRun(previous) };
           }
           const id = uuid();
@@ -157,7 +237,11 @@ export function createWorkbenchService({ db, ownerId, scanner = defaultScanner, 
             await write("INSERT INTO workbench_runs (id, owner_id, project_id, repo, repository_id, request_id, requested_revision, revision, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 'running', ?, ?)", id, ownerId, scope.id, scope.repo, scope.repository_id, requestId, requestedRevision, created, created);
           } catch {
             const repeated = await first('SELECT * FROM workbench_runs WHERE owner_id = ? AND request_id = ?', ownerId, requestId);
-            if (repeated && repeated.project_id === scope.id && repeated.requested_revision === requestedRevision) return { run: await fullRun(repeated) };
+            if (repeated) {
+              const repeatedSource = repeated.result_json ? JSON.parse(repeated.result_json).source ?? 'github-public' : 'github-public';
+              if (repeated.project_id === scope.id && repeated.requested_revision === requestedRevision && repeatedSource === 'github-public') return { run: await fullRun(repeated) };
+              throw new WorkbenchError('Esta solicitação já foi usada para outra análise.', 409);
+            }
             const active = await first("SELECT id FROM workbench_runs WHERE owner_id = ? AND project_id = ? AND status = 'running'", ownerId, scope.id);
             if (active) throw new WorkbenchError('Já existe uma análise em andamento para este projeto.', 409);
             throw new WorkbenchError('Não foi possível iniciar a análise.', 503);
@@ -196,6 +280,7 @@ export function createWorkbenchService({ db, ownerId, scanner = defaultScanner, 
           if (before.project_id !== after.project_id || before.repo !== after.repo || before.repository_id !== after.repository_id) throw new WorkbenchError('Compare análises do mesmo projeto e identidade de repositório.');
           const left = JSON.parse(before.result_json);
           const right = JSON.parse(after.result_json);
+          if ((left.source ?? 'github-public') !== (right.source ?? 'github-public')) throw new WorkbenchError('Compare análises produzidas pelo mesmo método.');
           const old = new Set(left.findings.map(finding => finding.fingerprint));
           const current = new Set(right.findings.map(finding => finding.fingerprint));
           return { comparison: { new: [...current].filter(item => !old.has(item)), no_longer_detected: [...old].filter(item => !current.has(item)), still_detected: [...current].filter(item => old.has(item)), partial: left.partial || right.partial } };
@@ -211,17 +296,30 @@ export function createWorkbenchService({ db, ownerId, scanner = defaultScanner, 
   };
 }
 
-export async function handleWorkbenchRequest(request, { getUser, getDb, authorizedOwnerId, scanner = defaultScanner, now = () => new Date(), uuid = () => crypto.randomUUID() }) {
+export async function handleWorkbenchRequest(request, { getUser, getDb, authorizedOwnerId, scanner = defaultScanner, now = () => new Date(), uuid = () => crypto.randomUUID() }, { reaImportOnly = false } = {}) {
   try {
     const user = await getUser();
     if (!user?.userId) throw new WorkbenchError('Entre para acessar o Workbench.', 401);
     if (typeof authorizedOwnerId !== 'string' || !authorizedOwnerId.trim()) throw new WorkbenchError('Operação real indisponível: configuração do proprietário pendente.', 503);
     if (user.userId !== authorizedOwnerId) throw new WorkbenchError('Operação real restrita ao proprietário.', 403);
     if (request.method !== 'GET' && request.method !== 'POST') throw new WorkbenchError('Método não permitido.', 405);
-    const payload = request.method === 'POST' ? await parseBody(request) : null;
+    if (reaImportOnly && request.method !== 'POST') throw new WorkbenchError('Método não permitido.', 405);
+    if (request.method === 'POST' && user.provider === 'github' &&
+      (typeof user.csrfToken !== 'string' || request.headers.get('X-Workbench-CSRF') !== user.csrfToken)) {
+      throw new WorkbenchError('A solicitação não corresponde à sessão atual. Recarregue a página.', 403);
+    }
+    const payload = request.method === 'POST' ? await parseBody(request, reaImportOnly ? MAX_REA_BODY_BYTES : MAX_BODY_BYTES) : null;
+    if (reaImportOnly) {
+      if (payload.action !== undefined && payload.action !== 'import-rea') throw new WorkbenchError('Ação não permitida nesta rota.');
+      payload.action = 'import-rea';
+    }
     const service = createWorkbenchService({ db: await getDb(), ownerId: user.userId, scanner, now, uuid });
     return response(request.method === 'GET' ? await service.list() : await service.act(payload));
   } catch (error) {
     return response({ error: error instanceof WorkbenchError ? error.message : 'Não foi possível concluir a solicitação. Tente novamente.' }, error instanceof WorkbenchError ? error.status : 500);
   }
+}
+
+export function handleReaImportRequest(request, dependencies) {
+  return handleWorkbenchRequest(request, dependencies, { reaImportOnly: true });
 }

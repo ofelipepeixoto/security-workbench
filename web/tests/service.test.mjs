@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import { createWorkbenchService, handleWorkbenchRequest } from '../lib/workbench-service.mjs';
+import { createWorkbenchService, handleWorkbenchRequest, handleReaImportRequest } from '../lib/workbench-service.mjs';
 
 const REPO = 'ofelipepeixoto/rea';
 const REVISION = 'a'.repeat(40);
@@ -47,6 +47,27 @@ function scanner(overrides = {}) {
   };
 }
 
+function reaFixture() {
+  const digest = 'a'.repeat(64), node = 'jag_node_' + '1'.repeat(64);
+  return JSON.stringify({
+    fixture_notice: 'Synthetic import-contract fixture; not a completed REA execution.',
+    evidence_id: 'ev_' + '2'.repeat(64),
+    provider: { id: 'rea-javascript-application', version: '1' },
+    operation: 'analyze_javascript_application', predicate_type: 'rea.javascript-application-analysis',
+    authority: 'shipped-artifact', confidence: 'derived',
+    subject: { digest: { sha256: digest }, format: 'directory', local_path: '/NEVER_PERSIST' },
+    normalized_result: { root_artifact_sha256: digest, format: 'directory',
+      statistics: { relevant_files: 1, parsed_javascript_files: 1, parse_failures: 0, text_bytes_read: 50, findings: 1 },
+      graph: { schema: 'JavaScriptApplicationGraph', root_node_ids: [node],
+        coverage: { status: 'complete', truncated: false, omitted_count: 0, limits: [] },
+        nodes: [{ node_id: node, kind: 'endpoint', observations: [{ observation_id: 'jag_observation_' + '3'.repeat(64),
+          properties: { value: 'NEVER_PERSIST', status: 'confirmed' },
+          evidence: { authority: 'ast-static-analysis', state: 'observed',
+            artifact: { available: true, artifact_id: 'art_' + digest, sha256: digest },
+            location: { available: true, value: { kind: 'source-range', source: 'fixture.js', start: { line: 1, column: 0 }, end: { line: 1, column: 10 } } } } }] }] } },
+  });
+}
+
 async function authorize(service) {
   return (await service.act({ action: 'authorize', repo: REPO, repositoryId: 10, confirmed: true })).project;
 }
@@ -55,8 +76,24 @@ function dependencies(db, options = {}) {
   return { authorizedOwnerId: 'owner-a', getUser: async () => ({ userId: 'owner-a' }), getDb: () => db, scanner: scanner(), ...options };
 }
 
-function request(payload, headers = {}) {
-  return new Request('https://workbench.example/api/workbench', { method: 'POST', headers: { Origin: 'https://workbench.example', 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(payload) });
+function request(payload, headers = {}, path = '/api/workbench') {
+  return new Request(`https://workbench.example${path}`, { method: 'POST', headers: { Origin: 'https://workbench.example', 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(payload) });
+}
+
+function simultaneousRequestLookup(db) {
+  let arrivals = 0, release;
+  const bothRead = new Promise(resolve => { release = resolve; });
+  return { ...db, prepare(query) { return { bind(...values) {
+    const bound = db.prepare(query).bind(...values);
+    return { ...bound, async first() {
+      const row = await bound.first();
+      if (query === 'SELECT * FROM workbench_runs WHERE owner_id = ? AND request_id = ?' && !row && arrivals < 2) {
+        if (++arrivals === 2) release();
+        await bothRead;
+      }
+      return row;
+    } };
+  } }; } };
 }
 
 test('only the configured Site owner reaches any real API operation', async () => {
@@ -111,6 +148,37 @@ test('streamed JSON is bounded without a trusted content length and errors never
   const rawError = await handleWorkbenchRequest(new Request('https://workbench.example/api/workbench'), dependencies(null, { getDb() { throw new Error('private token=abc source'); } }));
   assert.equal(rawError.status, 500);
   assert.equal((await rawError.text()).includes('token=abc'), false);
+});
+
+test('oversized REA streams are rejected even when cancellation never settles', async () => {
+  let cancelled = false, accessed = false, timeout;
+  const token = 'c'.repeat(43);
+  const stream = new ReadableStream({
+    start(controller) { controller.enqueue(new Uint8Array(2 * 1024 * 1024 + 8193)); },
+    cancel() { cancelled = true; return new Promise(() => {}); },
+  });
+  const req = new Request('https://workbench.example/api/workbench/rea', { method: 'POST', headers: { Origin: 'https://workbench.example', 'Content-Type': 'application/json', 'X-Workbench-CSRF': token }, body: stream, duplex: 'half' });
+  try {
+    const result = await Promise.race([
+      handleReaImportRequest(req, dependencies(null, { getUser: async () => ({ userId: 'owner-a', provider: 'github', csrfToken: token }), getDb() { accessed = true; } })),
+      new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error('unbounded stream cancellation')), 1000); }),
+    ]);
+    assert.equal(result.status, 413);
+    assert.equal(cancelled, true);
+    assert.equal(accessed, false);
+  } finally { clearTimeout(timeout); }
+});
+
+test('a stalled upload reaches its fixed read deadline without waiting on cancellation', { timeout: 15000 }, async () => {
+  let cancelled = false, accessed = false;
+  const token = 'c'.repeat(43);
+  const stream = new ReadableStream({ cancel() { cancelled = true; return new Promise(() => {}); } });
+  const req = new Request('https://workbench.example/api/workbench/rea', { method: 'POST', headers: { Origin: 'https://workbench.example', 'Content-Type': 'application/json', 'X-Workbench-CSRF': token }, body: stream, duplex: 'half' });
+  const result = await handleReaImportRequest(req, dependencies(null, { getUser: async () => ({ userId: 'owner-a', provider: 'github', csrfToken: token }), getDb() { accessed = true; } }));
+  assert.equal(result.status, 408);
+  assert.equal(cancelled, true);
+  assert.equal(accessed, false);
+  assert.equal(result.headers.get('cache-control'), 'no-store');
 });
 
 test('public GitHub quota exhaustion returns a safe retry message', async () => {
@@ -237,5 +305,141 @@ test('reviews are scoped to actual findings and comparison does not treat review
   const { run: after } = await svc.act({ action: 'scan', projectId: project.id, requestId: REQUEST2 });
   assert.deepEqual((await svc.act({ action: 'compare', before: before.id, after: after.id })).comparison, { new: [], no_longer_detected: [], still_detected: ['f1'], partial: false });
   assert.equal((await svc.list()).runs[0].findings_count, 1);
+  db.close();
+});
+
+test('historical findings retain current review decisions and never cross owner boundaries', async () => {
+  const db = database();
+  const svc = createWorkbenchService({ db, ownerId: 'owner-a', scanner: scanner() });
+  const project = await authorize(svc);
+  const { run } = await svc.act({ action: 'scan', projectId: project.id, requestId: REQUEST });
+  await svc.act({ action: 'review', runId: run.id, fingerprint: 'f1', decision: 'accepted_risk' });
+  const reloaded = createWorkbenchService({ db, ownerId: 'owner-a', scanner: scanner() });
+  const view = await reloaded.act({ action: 'findings' });
+  assert.equal(view.findings[0].status, 'accepted_risk');
+  assert.equal(view.findings[0].run_id, run.id);
+  assert.equal(view.findings[0].project_id, project.id);
+  assert.equal(view.runs_considered, 1);
+  assert.equal(view.truncated, false);
+  const other = createWorkbenchService({ db, ownerId: 'owner-b', scanner: scanner() });
+  assert.deepEqual((await other.act({ action: 'findings' })).findings, []);
+  assert.equal((await svc.list()).projects[0].has_runs, true);
+  db.close();
+});
+
+test('historical sample signals omitted runs rather than presenting a complete count', async () => {
+  const db = database();
+  const svc = createWorkbenchService({ db, ownerId: 'owner-a', scanner: scanner() });
+  const project = await authorize(svc);
+  for (let i = 0; i < 21; i++) await svc.act({ action: 'scan', projectId: project.id, requestId: crypto.randomUUID() });
+  const result = await svc.act({ action: 'findings' });
+  assert.equal(result.runs_considered, 20);
+  assert.equal(result.findings.length, 20);
+  assert.equal(result.truncated, true);
+  db.close();
+});
+
+test('GitHub POST requests require the session CSRF token before touching D1', async () => {
+  let touched = false;
+  const token = 'c'.repeat(43);
+  const deps = dependencies(null, { getUser: async () => ({ userId: 'owner-a', provider: 'github', csrfToken: token }), getDb() { touched = true; } });
+  for (const header of [undefined, 'wrong-token']) {
+    const req = request({ action: 'findings' });
+    if (header) req.headers.set('X-Workbench-CSRF', header);
+    assert.equal((await handleWorkbenchRequest(req, deps)).status, 403);
+  }
+  assert.equal(touched, false);
+  const db = database();
+  const req = request({ action: 'findings' }, { 'X-Workbench-CSRF': token });
+  assert.equal((await handleWorkbenchRequest(req, { ...deps, getDb: () => db })).status, 200);
+  db.close();
+});
+
+test('REA upload guards reject anonymous, wrong-owner, oversized and wrong-action requests', async () => {
+  let touched = false;
+  const deps = dependencies(null, { getDb() { touched = true; } });
+  assert.equal((await handleReaImportRequest(request({ evidence: '{}' }), { ...deps, getUser: async () => null })).status, 401);
+  assert.equal((await handleReaImportRequest(request({ evidence: '{}' }), { ...deps, getUser: async () => ({ userId: 'other' }) })).status, 403);
+  assert.equal((await handleReaImportRequest(request({ action: 'authorize' }), deps)).status, 400);
+  const large = request({}, { 'Content-Length': String(3 * 1024 * 1024) });
+  assert.equal((await handleReaImportRequest(large, deps)).status, 413);
+  assert.equal(touched, false);
+});
+
+test('REA import persists only a safe projection and supports reload, review, report and bounded comparison', async () => {
+  const db = database();
+  const svc = createWorkbenchService({ db, ownerId: 'owner-a', scanner: scanner() });
+  const project = await authorize(svc);
+  const payload = { action: 'import-rea', projectId: project.id, requestId: REQUEST, revision: REVISION, evidence: reaFixture() };
+  const token = 'c'.repeat(43);
+  const uploaded = await handleReaImportRequest(request(payload, { 'X-Workbench-CSRF': token }, '/api/workbench/rea'),
+    dependencies(db, { getUser: async () => ({ userId: 'owner-a', provider: 'github', csrfToken: token }) }));
+  assert.equal(uploaded.status, 200);
+  assert.equal(uploaded.headers.get('cache-control'), 'no-store');
+  const { run } = await uploaded.json();
+  assert.equal(run.source, 'rea-import');
+  assert.equal(run.verified_revision, false);
+  assert.equal(run.partial, true);
+  assert.equal(run.findings[0].status, 'candidate');
+  const stored = await db.prepare('SELECT result_json FROM workbench_runs WHERE id = ?').bind(run.id).first();
+  assert.doesNotMatch(stored.result_json, /NEVER_PERSIST|normalized_result|local_path/);
+  assert.equal((await svc.act(payload)).run.id, run.id);
+  await assert.rejects(svc.act({ ...payload, evidence: payload.evidence + '\n' }), error => error.status === 409);
+  await assert.rejects(svc.act({ action: 'scan', projectId: project.id, requestId: REQUEST, revision: REVISION }), error => error.status === 409);
+  await svc.act({ action: 'review', runId: run.id, fingerprint: run.findings[0].fingerprint, decision: 'false_positive' });
+  const reloaded = createWorkbenchService({ db, ownerId: 'owner-a', scanner: scanner() });
+  assert.equal((await reloaded.act({ action: 'run', runId: run.id })).run.findings[0].status, 'false_positive');
+  const realRenderer = createWorkbenchService({ db, ownerId: 'owner-a' });
+  const report = (await realRenderer.act({ action: 'report', runId: run.id })).markdown;
+  assert.match(report, /Proveniência da importação REA/);
+  assert.match(report, /não executou o REA/);
+  assert.doesNotMatch(report, /NEVER_PERSIST|até 20 arquivos/);
+  const second = await reloaded.act({ ...payload, requestId: REQUEST2 });
+  assert.equal((await svc.act({ action: 'compare', before: run.id, after: second.run.id })).comparison.partial, true);
+  const scanned = await svc.act({ action: 'scan', projectId: project.id, requestId: crypto.randomUUID() });
+  await assert.rejects(svc.act({ action: 'compare', before: run.id, after: scanned.run.id }), /mesmo método/);
+  const other = createWorkbenchService({ db, ownerId: 'owner-b' });
+  await assert.rejects(other.act({ ...payload, requestId: crypto.randomUUID() }), error => error.status === 404);
+  db.close();
+});
+
+test('simultaneous matching REA uploads return one persisted run through HTTP', { timeout: 2000 }, async () => {
+  const db = database(), shared = simultaneousRequestLookup(db);
+  const svc = createWorkbenchService({ db: shared, ownerId: 'owner-a', scanner: scanner() });
+  const project = await authorize(svc), token = 'c'.repeat(43);
+  const payload = { projectId: project.id, requestId: REQUEST, revision: REVISION, evidence: reaFixture() };
+  const deps = dependencies(shared, { getUser: async () => ({ userId: 'owner-a', provider: 'github', csrfToken: token }) });
+  const replies = await Promise.all([handleReaImportRequest(request(payload, { 'X-Workbench-CSRF': token }, '/api/workbench/rea'), deps), handleReaImportRequest(request(payload, { 'X-Workbench-CSRF': token }, '/api/workbench/rea'), deps)]);
+  assert.deepEqual(replies.map(reply => reply.status), [200, 200]);
+  const imported = await Promise.all(replies.map(reply => reply.json()));
+  assert.equal(imported[0].run.id, imported[1].run.id);
+  assert.equal((await svc.list()).runs.length, 1);
+  db.close();
+});
+
+test('concurrent imports reject conflicting report bytes or revision instead of returning another result', { timeout: 2000 }, async () => {
+  for (const conflict of [{ evidence: reaFixture() + '\n' }, { revision: 'b'.repeat(40) }]) {
+    const db = database(), shared = simultaneousRequestLookup(db);
+    const svc = createWorkbenchService({ db: shared, ownerId: 'owner-a', scanner: scanner() });
+    const project = await authorize(svc);
+    const payload = { action: 'import-rea', projectId: project.id, requestId: REQUEST, revision: REVISION, evidence: reaFixture() };
+    const results = await Promise.allSettled([svc.act(payload), svc.act({ ...payload, ...conflict })]);
+    assert.equal(results.filter(result => result.status === 'fulfilled').length, 1);
+    assert.equal(results.find(result => result.status === 'rejected').reason.status, 409);
+    assert.equal((await svc.list()).runs.length, 1);
+    db.close();
+  }
+});
+
+test('GitHub acquisition and REA import never reuse the other method under concurrent request-ID collision', { timeout: 2000 }, async () => {
+  const db = database(), shared = simultaneousRequestLookup(db);
+  const svc = createWorkbenchService({ db: shared, ownerId: 'owner-a', scanner: scanner() });
+  const project = await authorize(svc);
+  const imported = { action: 'import-rea', projectId: project.id, requestId: REQUEST, revision: REVISION, evidence: reaFixture() };
+  const acquired = { action: 'scan', projectId: project.id, requestId: REQUEST, revision: REVISION };
+  const results = await Promise.allSettled([svc.act(imported), svc.act(acquired)]);
+  assert.equal(results.filter(result => result.status === 'fulfilled').length, 1);
+  assert.equal(results.find(result => result.status === 'rejected').reason.status, 409);
+  assert.equal((await svc.list()).runs.length, 1);
   db.close();
 });

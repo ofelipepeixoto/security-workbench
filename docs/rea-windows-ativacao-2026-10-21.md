@@ -9,14 +9,18 @@ segundo os retornos do operador. As 409 dependências do REA estão instaladas c
 lockfile íntegro. A compilação completa falhou em duas execuções registradas
 (OOM e timeout). Depois, a emissão sem typecheck terminou em 4 s e o bundle em 2 s,
 com status zero e cinco hashes conferidos pelo helper, segundo o operador.
-A análise do motor ainda não ocorreu.
+A primeira análise do motor foi concluída posteriormente: fixture própria de
+342 bytes, um arquivo analisado, zero falhas e unidade encerrada em sete segundos.
 
 O preparo está registrado na [preparação limitada do runtime](rea-runtime-preparacao-2026-10-21.md).
-O próximo procedimento é o [teste da fixture própria inerte](rea-fixture-inerte-2026-10-21.md).
+O [resultado da fixture própria inerte](rea-fixture-inerte-2026-10-21.md) registra
+o aceite e os hashes. O próximo passo usa o Evidence existente na importação da
+plataforma, sem repetir instalação, compilação ou execução do motor.
 As seções posteriores preservam a trajetória e os comandos das etapas anteriores;
 essas etapas não precisam ser repetidas. `memory_enforced`/`ready_for_rea` do helper
 continuam false por contrato, mesmo com os limites externos daquela unidade
-verificados. A futura análise precisa de seus próprios limites e prova de execução.
+verificados. A execução posterior da fixture verificou seus próprios limites;
+não habilita entradas arbitrárias, typecheck completo ou homologação hospedada.
 
 O Site v13 publicado e seu login GitHub configurado pertencem à área hospedada.
 O bloqueio tratado aqui é o runtime/executor REA local e não exige configurar

@@ -2,7 +2,7 @@
 
 O runtime foi preparado sem typecheck, segundo o resultado do operador registrado
 na [preparação](rea-runtime-preparacao-2026-10-21.md). Este procedimento propõe a
-primeira análise estática nativa; ainda não há resultado do operador. Site v13,
+primeira análise estática nativa, concluída segundo o retorno do operador registrado abaixo. Site v13,
 login GitHub, D1 e homologação hospedada são etapas separadas.
 
 ## Escopo fixo
@@ -93,8 +93,8 @@ permanece um próximo aceite, sem duplicar seu parser neste helper.
 | Item | Estado | Evidência | Bloqueio | Próxima ação | Responsável | Aceite |
 | --- | --- | --- | --- | --- | --- | --- |
 | Runtime local sem typecheck | Preparado segundo o operador | Emit 4 s, bundle 2 s, status zero e cinco hashes | Typecheck completo pendente | Preservar os mesmos artefatos | Proprietário + engenharia | Pins e hashes continuam iguais antes e depois da prova |
-| Primeira fixture nativa | Helper implementado para revisão; sem resultado do operador | Escopo e limites deste documento | Execução no WSL necessária | Executar somente o helper fixado e compartilhar resumo | Proprietário com apoio da engenharia | Evidence nativo e todos os gates da fixture aprovados; ausência de candidatos é resultado válido |
-| Importação do Evidence real | Pendente | Importador já existe no produto; só fixtures sintéticas foram usadas até aqui | Evidence nativo ainda não observado | Conferir projeção com parser existente e homologar persistência/revisão/exportação | Engenharia + proprietário | Sem JSON bruto persistido ou achados inventados; vínculo e cobertura declarados explícitos |
+| Primeira fixture nativa | Concluída segundo retorno do operador | Helper fixado/hash aprovado, marcador final, unidade encerrada; uma fonte/342 bytes e zero falhas em 7 s | Nenhum bloqueio desta prova fixa; typecheck e importação são separados | Preservar a saída existente; não reinstalar, recompilar ou repetir o motor | Proprietário com apoio da engenharia | Evidence nativo e gates desta fixture aprovados; uma observação estrutural não confirma vulnerabilidade |
+| Importação do Evidence real | Pendente | Evidence nativo observado; parser existente foi reconferido, sem dependências externas | Bytes privados ainda não passaram pelo importador Workbench | Importar o mesmo evidence.json no projeto e commit da fixture na área autenticada; conferir persistência/revisão/exportação | Engenharia + proprietário | Sem JSON bruto persistido ou achados inventados; vínculo e cobertura declarados explícitos |
 | Entradas adversariais ou arbitrárias | Não habilitadas por este teste | `ready_for_untrusted_targets=false` | Só uma fixture inerte tem escopo definido | Preparar próxima fixture estática controlada após resultado | Engenharia + proprietário | Rede/escrita/execução do alvo recusadas e limites verificados no executor adequado |
 
 Reversão: não usar a saída e preservar a tentativa local para inspeção. O helper
@@ -128,3 +128,39 @@ Passaram também sintaxe Bash externa/interna, Node `--check` do verificador e
 `git diff --check`; revisão independente sem bloqueio crítico/alto para esse escopo.
 Aplicativo web, dependências, TypeScript web e build não mudaram nem foram
 retestados neste incremento. Não houve merge ou nova publicação do Site.
+
+## Resultado nativo fornecido pelo operador
+
+Em 21/10/2026, o operador executou o helper no commit
+`72b9b3a14f306305c02efe07962ab3205f9ec1fd`, após conferir SHA-256
+`45f9bc988d86b7cf275f89cc7b9b1f20e038d83a8f218c76f7844b7a6617371c`.
+Forneceu `terminacao_unidade=confirmada`, `native_fixture_completed:true` e
+`FIXTURE_NATIVA_CONCLUIDA`. O intervalo foi 23:45:41–23:45:48 UTC
+(20:45:41–20:45:48 BRT), sete segundos decorridos. Não é medição de CPU/memória.
+
+| Dado observado no resumo | Resultado |
+| --- | --- |
+| Arquivos relevantes / analisados / falhas de parse | 1 / 1 / 0 |
+| Bytes de entrada lidos | 342 |
+| Grafo da aplicação | 4 nós, 3 arestas; cobertura `complete` |
+| Cobertura semântica | `unknown` |
+| Contagem nativa de findings / limitações | 1 / 6; não é contagem de vulnerabilidades ou de candidatos importados |
+| Evidence bruto | 31.834 bytes; SHA-256 `a0919437dff28879897da289284199daea0f88ccb57a3dea047f61ef8e6581a4` |
+| Digest da raiz declarado pelo REA | `fbb1642452f6296f6113c9978a5af9f8ee769592e226ca98f5d01e6359dffc41`; distinto do hash medido do arquivo de entrada |
+
+A conclusão do helper fixado implica seus gates de cgroup/NoNewPrivs, rede,
+entrada somente leitura e caminhos privados. Os valores 1 GiB/swap zero/64 tarefas,
+uma CPU/30 s são limites, não consumo observado. O teste de listener loopback
+anterior não foi repetido. `typecheck_complete`, `ready_for_untrusted_targets`,
+`workbench_import_verified` e `loopback_control_repeated` permanecem false.
+Essas limitações não anulam o resultado nem exigem novo bootstrap.
+
+O Evidence e os logs permanecem privados. A próxima ação usa o mesmo arquivo,
+sem executar o REA novamente: **Projetos → Importar REA local**, projeto
+`ofelipepeixoto/security-workbench`, commit declarado da fixture
+`1b0c93114d7a215aa73844e5a7edd62620dd25eb`. Não escolher o projeto REA ou seu
+commit de ferramenta. O parser estrito existente será aplicado pelo servidor;
+o aceite deve conferir o hash do relatório, a cobertura parcial e a projeção
+efetiva, que pode ter contagem diferente do finding nativo. Se a resposta for
+incerta, conferir o histórico antes de enviar novamente. Persistência, revisão,
+comparação e Markdown hospedados ainda não foram homologados por este retorno.

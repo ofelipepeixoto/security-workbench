@@ -82,7 +82,7 @@ do serviço inferido apenas pelo término do cliente; não habilitar rede ou rel
 | Compilação completa | Falhou em duas execuções registradas | OOM e timeout acima; cinco sentinelas ausentes/vazias | Limites atingidos; fase exata desconhecida | Usar fases separadas com registro próprio | Engenharia + proprietário | Nenhuma falha tratada como runtime pronto |
 | Emissão sem typecheck e bundle | Concluídos segundo retorno do operador | Helper fixado/hash conferido; emit status 0 em 4 s, bundle status 0 em 2 s e cinco hashes registrados abaixo | Nenhum bloqueio desse preparo; typecheck e análise são separados | Preservar runtime e seguir para a fixture própria | Proprietário com apoio da engenharia | Marcador final observado; fonte e lockfile verificados pelo helper antes e depois |
 | Typecheck completo do REA | Pendente | Modo `--noCheck` declarado | Compilação completa não passou | Investigar custo e validar tipos separadamente | Engenharia | Checagem do commit fixado aprovada, sem esconder a exceção |
-| Primeira análise REA | Não executada | Preparo concluído e pré-flight aprovado segundo o operador | Executor de análise e Evidence nativo ainda sem aceite | Primeiro fixture própria inerte, depois fixture estática controlada | Engenharia + proprietário | Evidence nativo, isolamento, limites, horários e projeção verificados |
+| Primeira análise REA | Fixture inerte concluída segundo retorno posterior do operador | [Resultado nativo](rea-fixture-inerte-2026-10-21.md): 7 s, uma fonte/342 bytes, zero falhas e unidade encerrada | Importação e typecheck completo continuam separados | Preservar o runtime e importar a saída existente na plataforma | Engenharia + proprietário | Não repetir preparo; observação estrutural não vira vulnerabilidade e cobertura semântica permanece unknown |
 
 Reversão: não usar o novo runtime; manter o diretório de tentativa e a cópia
 preservada de `dist` para inspeção local. Nenhuma fonte, dependência, configuração
@@ -124,5 +124,7 @@ previstos naquela versão; não é prova dos limites da futura análise.
 
 `typecheck_complete=false` e `ready_for_rea=false` permanecem esperados. O novo
 [teste de fixture inerte](rea-fixture-inerte-2026-10-21.md) é um passo separado,
-sem resultado nativo observado até este registro. Nenhuma análise, vulnerabilidade
-ou prontidão para alvos arbitrários foi inferida a partir do build.
+cujo resultado posterior do operador concluiu uma análise de 342 bytes em sete
+segundos, com zero falhas e unidade encerrada. Essa execução possui registro
+próprio no documento da fixture; não foi inferida a partir do build. Importação,
+typecheck completo e prontidão para alvos arbitrários continuam pendentes.

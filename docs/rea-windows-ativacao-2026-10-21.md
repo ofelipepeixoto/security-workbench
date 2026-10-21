@@ -63,10 +63,16 @@ O comando abaixo usa somente o checkout dedicado já preparado, o Node Linux e o
   umask 077
   rea_base="$HOME/.local/share/security-workbench"
   rea_checkout="$rea_base/rea-3e7c630"
+  rea_bwrap="$rea_base/bubblewrap-0.13.1/bin/bwrap"
 
   test "$(git -C "$rea_checkout" rev-parse HEAD)" = \
     3e7c6302233ecbcb9b92e43ee5a60337738961bd
   test -z "$(git -C "$rea_checkout" status --porcelain)"
+  test "$("$rea_bwrap" --version)" = 'bubblewrap 0.13.1'
+  cd "$rea_base/bubblewrap-0.13.1/bin"
+  printf '%s  %s\n' \
+    'd7e217424a96140625d3e83df81e66a9e91de40ed9f882d07505da99fa005a76' \
+    'bwrap' | sha256sum --check -
 
   systemd-run --user --quiet --wait --pipe --collect \
     --expand-environment=no \
@@ -76,7 +82,16 @@ O comando abaixo usa somente o checkout dedicado já preparado, o Node Linux e o
     -p RuntimeMaxSec=600s -p TimeoutStopSec=2s \
     -p KillMode=control-group -p UMask=0077 \
     -p NoNewPrivileges=yes \
-    /usr/bin/bwrap \
+    /usr/bin/env -i LANG=C PATH=/usr/bin:/bin \
+    /bin/sh -eu -c '
+      rea_cgroup=$(cut -d: -f3 /proc/self/cgroup)
+      test "$(cat "/sys/fs/cgroup${rea_cgroup}/memory.max")" = 2147483648
+      test "$(cat "/sys/fs/cgroup${rea_cgroup}/memory.swap.max")" = 0
+      test "$(cat "/sys/fs/cgroup${rea_cgroup}/pids.max")" = 128
+      printf "LIMITES_COMPILACAO_OK\n"
+      exec "$@"
+    ' rea-compile-unit \
+    "$rea_bwrap" \
     --unshare-user --unshare-net --unshare-pid --unshare-ipc --unshare-uts \
     --die-with-parent --new-session --clearenv --cap-drop ALL \
     --ro-bind /usr /usr \
@@ -114,6 +129,7 @@ O comando abaixo usa somente o checkout dedicado já preparado, o Node Linux e o
     dist/composition/javascriptAnalysisWorkerProcess.js
   do
     test -f "$rea_file"
+    sha256sum "$rea_file"
   done
 
   git diff --exit-code --quiet
@@ -124,7 +140,7 @@ O comando abaixo usa somente o checkout dedicado já preparado, o Node Linux e o
 )
 ~~~
 
-Esse comando foi revisado no código fixado; ainda não foi executado no ambiente do operador. Os limites pedidos para compilação não substituem a verificação dos limites efetivos no executor da futura análise.
+Esse comando foi revisado no código fixado e atualizado para o Bubblewrap privado conferido; ainda não foi executado no ambiente do operador. Confere 2 GiB/swap zero/128 tarefas na própria unidade antes do build. Os controles da compilação não substituem a verificação no executor da futura análise.
 
 ## Atualização do gate Bubblewrap
 
@@ -246,11 +262,13 @@ Durante Meson/Ninja a rede fica em namespace separado, fonte e `/usr` somente le
 
 O operador retornou os sete passos C/link concluídos, instalação em `/output/bin`, versão `bubblewrap 0.13.1`, `BWRAP_COMPILADO_OK` e SHA-256 do binário **`d7e217424a96140625d3e83df81e66a9e91de40ed9f882d07505da99fa005a76`**. Esse digest observado é diferente do digest do tarball. O bloco compilou e instalou somente a ferramenta confiável em prefix privado; não iniciou análise REA. O pré-flight real desse executável e sua disponibilidade de namespaces ainda estão pendentes. Os limites solicitados no build não foram apresentados como medição de consumo nem homologação de recursos do engine.
 
-## Pré-flight do executável privado — proposto, ainda sem resultado
+## Pré-flight do executável privado — aprovado segundo retorno do operador
 
 O helper fixado em `7e2dd120e20cb8f0dbbaca58604ac623d9d40825` tem SHA-256 `8db65c9d81aad084a33efff221876d7e14571719188f6e56e72148e6976fdf02`. O bloco usa nome local novo, confere o binário recém-compilado e o helper antes de invocar o módulo. A sentinela `rea-preflight-wrapper` em argv[1] é necessária: o helper é importado por argv[2], sem acionar sua CLI. A engenharia verificou esse roteamento com retorno antecipado de plataforma não suportada, sem tentar namespaces na cloud.
 
 Os valores cgroup são conferidos dentro da mesma unidade que inicia Node/helper/Bubblewrap. O controle positivo de loopback acontece fora do namespace, mas dentro dessa unidade; o controle negativo acontece dentro da sandbox. `LIMITES_PREFLIGHT_OK` só aparece depois dos três valores esperados. `memory_enforced` e `ready_for_rea` no JSON continuam false por contrato: o helper não prova o futuro engine. Falha de política/namespace permanece bloqueio, sem fallback ou remoção de `NoNewPrivileges`.
+
+O operador forneceu checksum do helper aprovado, `LIMITES_PREFLIGHT_OK` e JSON com `passed:true` e os 12 controles true para esse executável privado. Portanto os limites 536870912/0/32 foram verificados na unidade usada por esse pré-flight, e não somente numa unidade benigna separada. `memory_enforced` e `ready_for_rea` permaneceram false conforme o contrato fixo do helper. Essa prova é de controles com fixture própria; não é compilação/execução REA nem auditoria completa do mecanismo de isolamento. Não houve recusa de namespace no percurso observado.
 
 ~~~bash
 (

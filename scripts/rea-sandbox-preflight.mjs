@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { access, mkdtemp, mkdir, readFile, readlink, realpath, rm, writeFile } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import net from 'node:net';
-import { join, resolve } from 'node:path';
+import { join, posix, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 
@@ -93,18 +93,21 @@ async function sandboxProbe({ port, parentNamespace, fixtureHash }) {
   process.stdout.write(JSON.stringify(result));
 }
 
-/** Test hooks are trusted module callers only; the CLI exposes no options. */
-export async function runPreflight({ platform = process.platform, spawnImpl = spawn, checkAvailable = () => access('/usr/bin/bwrap', constants.X_OK), mkdtempImpl = mkdtemp, timeoutMs = 10000, killAfterMs = 2000 } = {}) {
+/** Executable selection and test hooks are for trusted local module callers only; the CLI exposes no options. */
+export async function runPreflight({ platform = process.platform, bwrapExecutable = '/usr/bin/bwrap', spawnImpl = spawn, checkAvailable = executable => access(executable, constants.X_OK), mkdtempImpl = mkdtemp, timeoutMs = 10000, killAfterMs = 2000 } = {}) {
   const result = report();
   if (platform !== 'linux') { result.code = 'unsupported_platform'; return result; }
   result.checks.linux = true;
+  if (typeof bwrapExecutable !== 'string' || !posix.isAbsolute(bwrapExecutable) || bwrapExecutable.includes('\0')) {
+    result.code = 'invalid_bwrap_executable'; return result;
+  }
   if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 10000 || !Number.isInteger(killAfterMs) || killAfterMs < 1 || killAfterMs > 2000) {
     result.code = 'invalid_limits'; return result;
   }
   let directory, server;
   const sockets = new Set();
   try {
-    await checkAvailable();
+    await checkAvailable(bwrapExecutable);
     const runtimeExecutable = await realpath(process.execPath);
     const parentNamespace = await readlink('/proc/self/ns/net');
     directory = await mkdtempImpl(join(tmpdir(), 'workbench-rea-preflight-'));
@@ -130,7 +133,7 @@ export async function runPreflight({ platform = process.platform, spawnImpl = sp
       '--setenv', 'PATH', cleanEnv.PATH, '--setenv', 'TMPDIR', cleanEnv.TMPDIR, '--chdir', '/tmp',
       '--', '/runtime/node', '/probe.mjs',
     ];
-    const child = await boundedProcess('/usr/bin/bwrap', args, { spawnImpl, timeoutMs, killAfterMs });
+    const child = await boundedProcess(bwrapExecutable, args, { spawnImpl, timeoutMs, killAfterMs });
     result.code = child.code;
     result.checks.sandbox_process = child.code === 'ok' && child.closed;
     if (result.checks.sandbox_process) {

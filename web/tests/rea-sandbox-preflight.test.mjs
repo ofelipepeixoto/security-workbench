@@ -3,7 +3,10 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
+import { randomUUID } from 'node:crypto';
 import { access, mkdtemp, realpath, stat } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { boundedProcess, runPreflight } from '../../scripts/rea-sandbox-preflight.mjs';
 
@@ -25,10 +28,41 @@ test('Windows is rejected before filesystem availability or child execution', as
 
 test('missing sandbox fails closed without echoing diagnostics or creating fixtures', async () => {
   let created = false;
-  const result = await runPreflight({ platform: 'linux', checkAvailable() { throw new Error('/private/inert-secret'); }, mkdtempImpl() { created = true; throw new Error('must not create'); } });
+  const result = await runPreflight({ platform: 'linux', checkAvailable(executable) { assert.equal(executable, '/usr/bin/bwrap'); throw new Error('/private/inert-secret'); }, mkdtempImpl() { created = true; throw new Error('must not create'); } });
   assert.equal(result.code, 'unavailable');
   assert.equal(result.passed, false);
   assert.equal(created, false);
+  safe(result);
+});
+
+test('invalid executable selection is rejected before availability, filesystem setup or spawning', async () => {
+  for (const bwrapExecutable of [null, true, false, 1, {}, ['/usr/bin/bwrap'], '', 'bwrap', './bwrap', 'C:\\private\\bwrap.exe', 'file:///usr/bin/bwrap', '/private/inert-secret\0/bwrap']) {
+    const called = { available: false, setup: false, spawn: false };
+    const result = await runPreflight({
+      platform: 'linux', bwrapExecutable,
+      checkAvailable() { called.available = true; throw new Error('must not inspect'); },
+      mkdtempImpl() { called.setup = true; throw new Error('must not create'); },
+      spawnImpl() { called.spawn = true; throw new Error('must not spawn'); },
+    });
+    assert.equal(result.code, 'invalid_bwrap_executable');
+    assert.equal(result.passed, false);
+    assert.deepEqual(called, { available: false, setup: false, spawn: false });
+    safe(result);
+  }
+});
+
+test('an explicitly selected absent executable fails closed without falling back to the system sandbox', async () => {
+  const bwrapExecutable = join(tmpdir(), 'workbench-bwrap-absent-' + randomUUID(), 'bwrap');
+  const called = { setup: false, spawn: false };
+  const result = await runPreflight({
+    platform: 'linux', bwrapExecutable,
+    mkdtempImpl() { called.setup = true; throw new Error('must not create'); },
+    spawnImpl() { called.spawn = true; throw new Error('must not spawn'); },
+  });
+  assert.equal(result.code, 'unavailable');
+  assert.equal(result.passed, false);
+  assert.deepEqual(called, { setup: false, spawn: false });
+  assert.equal(JSON.stringify(result).includes(bwrapExecutable), false);
   safe(result);
 });
 
@@ -65,18 +99,26 @@ test('projected checks discard extra data, preserve failure and never open the R
   if (process.platform !== 'linux') return;
   const runtimeExecutable = await realpath(process.execPath);
   assert.equal((await stat(runtimeExecutable)).isFile(), true);
-  for (const namespaceMatches of [true, false]) {
+  for (const { namespaceMatches, bwrapExecutable } of [
+    { namespaceMatches: true },
+    { namespaceMatches: true, bwrapExecutable: '/private/workbench prefix/bin/bwrap' },
+    { namespaceMatches: false, bwrapExecutable: '/private/workbench prefix/bin/bwrap' },
+  ]) {
+    const expectedExecutable = bwrapExecutable ?? '/usr/bin/bwrap';
     let inputDirectory, ownDirectory;
+    let availabilityChecked = false;
     const childChecks = {
       network_namespace: namespaceMatches, only_loopback: true, loopback_blocked: true,
       fixture_readable: true, input_read_only: true, private_paths_absent: true, environment_minimal: true,
       secret: '/private/inert-secret', ready_for_rea: true, memory_enforced: true,
     };
     const result = await runPreflight({
-      checkAvailable: async () => {},
+      bwrapExecutable,
+      checkAvailable: async executable => { assert.equal(executable, expectedExecutable); availabilityChecked = true; },
       async mkdtempImpl(prefix) { ownDirectory = await mkdtemp(prefix); return ownDirectory; },
       spawnImpl(command, args, options) {
-        assert.equal(command, '/usr/bin/bwrap');
+        assert.equal(availabilityChecked, true);
+        assert.equal(command, expectedExecutable);
         assert.deepEqual(options.stdio, ['ignore', 'pipe', 'pipe']);
         assert.deepEqual(Object.keys(options.env).sort(), ['PATH', 'TMPDIR']);
         assert.equal(options.shell, false);
@@ -93,6 +135,7 @@ test('projected checks discard extra data, preserve failure and never open the R
         return spawn(process.execPath, ['-e', 'process.stdout.write(' + JSON.stringify(JSON.stringify(childChecks)) + ')'], options);
       },
     });
+    assert.equal(availabilityChecked, true);
     assert.equal(result.passed, namespaceMatches);
     assert.equal(result.checks.network_namespace, namespaceMatches);
     assert.equal(result.checks.cleanup, true);

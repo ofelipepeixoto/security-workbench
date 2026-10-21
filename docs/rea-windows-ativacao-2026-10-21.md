@@ -137,4 +137,30 @@ dpkg-query -W -f='${Package} ${Version}\n' bubblewrap
 apt-cache policy bubblewrap
 ~~~
 
-Esses dois comandos são somente leitura. O operador retornou pacote instalado e candidato `0.11.1-1ubuntu0.1`, nos índices locais de `resolute-updates/main` e `resolute-security/main` amd64. A data de atualização desses índices não foi verificada. Essa versão não comprova a correção; o gate para entradas não confiáveis permanece aberto. Atualizar os índices oficiais e simular somente o upgrade do pacote é o próximo passo; nenhuma atualização de pacote foi realizada. Mesmo um candidato `0.11.1-1ubuntu0.3` não resolve este aviso, pois corresponde à reversão documentada no USN-8779-2. As 12 verificações aprovadas do helper continuam válidas para a fixture própria usada, sem constituir auditoria do Bubblewrap ou prontidão para entradas adversariais.
+Inicialmente, o operador retornou pacote instalado e candidato `0.11.1-1ubuntu0.1`, nos índices locais de `resolute-updates/main` e `resolute-security/main` amd64. Depois, `sudo apt-get update --error-on=any` concluiu com sucesso, e o candidato passou a `0.11.1-1ubuntu0.3`; instalado permaneceu `0.11.1-1ubuntu0.1`. A simulação mostrou um upgrade, zero novos pacotes, zero remoções e 130 não atualizados; nenhuma instalação/atualização de pacote foi executada. O candidato 0.3 corresponde à reversão do USN-8779-2 e não fecha este gate. As 12 verificações aprovadas do helper continuam válidas para a fixture própria usada, sem constituir auditoria do Bubblewrap ou prontidão para entradas adversariais.
+
+## Caminho separado para Bubblewrap corrigido
+
+Foi conferida na [release oficial 0.13.1](https://github.com/containers/bubblewrap/releases/tag/v0.13.1), publicada em 14/10/2026 às 12:21 UTC, a fonte `bubblewrap-0.13.1.tar.xz` com SHA-256 `0e85c8702248b8dd64144f594147553650cdd0e4c951690345faace79c217c4d`. O tag aponta para `362936aea0d5c6e70f7af75d2d44b5a914cb4ba2`. Não é uma instalação já realizada ou uma auditoria completa da ferramenta.
+
+A preparação proposta usa fonte fixada e prefix privado `$HOME/.local/share/security-workbench/bubblewrap-0.13.1`, sem substituir `/usr/bin/bwrap`, alterar o PATH global, adicionar PPA ou atualizar a distribuição. O build da fonte confiável usa Meson/Ninja e libcap; não envolve arquivos de alvo. As opções reais conferidas são `--wrap-mode=nodownload`, `-Dman=disabled`, `-Dbash_completion=disabled`, `-Dzsh_completion=disabled` e `-Dtests=false`. A versão não suporta mais setuid; não usar opções antigas que tentem habilitá-lo. A desativação dos testes upstream limita a prova do build: o pré-flight próprio deve ser repetido no executável efetivamente instalado e não equivale à suíte upstream.
+
+Primeiro instalar somente as ferramentas de compilação e dependências normais, a partir dos repositórios Ubuntu já configurados. APT apresenta a transação antes da confirmação; pode instalar/atualizar os pacotes solicitados e suas dependências, sem executar upgrade global:
+
+~~~bash
+(
+  set -eu
+  sudo apt-get install --no-install-recommends \
+    build-essential libcap-dev meson ninja-build pkg-config
+  cc --version
+  python3 --version
+  meson --version
+  ninja --version
+  pkg-config --modversion libcap
+  printf 'FERRAMENTAS_BWRAP_OK\n'
+)
+~~~
+
+Esse comando ainda não tem resultado do operador. Fonte baixada/conferida, compilação, instalação no prefix privado e teste do novo executável continuam pendentes. Se AppArmor ou namespaces recusarem o executável privado, registrar o bloqueio sem desabilitar a proteção ou recorrer silenciosamente ao binário antigo.
+
+`runPreflight` aceita, somente para chamada por módulo local confiável, `bwrapExecutable` com caminho absoluto POSIX sem NUL. O padrão continua `/usr/bin/bwrap`; disponibilidade e processo usam o mesmo caminho selecionado, sem seleção por PATH/ambiente nem fallback. A CLI continua sem argumentos e não recebe código ou caminhos de alvo. O invólucro local deverá apontar explicitamente para o executável conferido e imprimir somente o JSON projetado; `memory_enforced` e `ready_for_rea` continuam false.

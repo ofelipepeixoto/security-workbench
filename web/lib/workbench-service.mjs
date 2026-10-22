@@ -83,7 +83,9 @@ export function createWorkbenchService({ db, ownerId, scanner = defaultScanner, 
   const first = (query, ...args) => db.prepare(query).bind(...args).first();
   const all = async (query, ...args) => (await db.prepare(query).bind(...args).all()).results;
   const write = async (query, ...args) => {
-    const saved = await db.prepare(query).bind(...args).run();
+    let saved;
+    try { saved = await db.prepare(query).bind(...args).run(); }
+    catch { throw new WorkbenchError('O armazenamento não confirmou a operação. Confira o histórico antes de tentar novamente.', 503); }
     if (saved?.success !== true) throw new WorkbenchError('O armazenamento não confirmou a operação. Confira o histórico antes de tentar novamente.', 503);
     return saved;
   };
@@ -246,10 +248,11 @@ export function createWorkbenchService({ db, ownerId, scanner = defaultScanner, 
             if (active) throw new WorkbenchError('Já existe uma análise em andamento para este projeto.', 409);
             throw new WorkbenchError('Não foi possível iniciar a análise.', 503);
           }
+          let stored;
           try {
             const result = await scanner.inspectGitHub(scope.repo, scope.repository_id, requestedRevision);
             if (result.repository_id !== scope.repository_id || !SHA.test(result.revision) || (requestedRevision && result.revision !== requestedRevision)) throw new Error('identity');
-            const stored = {
+            stored = {
               revision: result.revision, repository_id: result.repository_id, snapshot_digest: result.snapshot_digest,
               files_read: result.files_read, bytes_read: result.bytes_read, partial: result.partial,
               omissions: result.omissions, findings: result.findings, dependencies: result.dependencies,
@@ -257,10 +260,17 @@ export function createWorkbenchService({ db, ownerId, scanner = defaultScanner, 
               oversized_skipped: result.oversized_skipped, findings_total: result.findings_total, dependencies_total: result.dependencies_total,
               source: result.source, verified_revision: result.verified_revision, limits: result.limits,
             };
-            await write("UPDATE workbench_runs SET status = 'complete', revision = ?, result_json = ?, updated_at = ? WHERE owner_id = ? AND id = ? AND status = 'running'", result.revision, JSON.stringify(stored), stamp(), ownerId, id);
-          } catch {
-            await write("UPDATE workbench_runs SET status = 'failed', failure_code = 'acquisition_failed', updated_at = ? WHERE owner_id = ? AND id = ? AND status = 'running'", stamp(), ownerId, id);
+          } catch (error) {
+            // Only trusted scanner error types select a public diagnostic.
+            // Never persist provider messages, URLs, response bodies or causes.
+            const failureCode = error instanceof defaultScanner.GitHubRateLimitError ? 'github_rate_limited' :
+              error instanceof defaultScanner.GitHubAcquisitionTimeoutError ? 'acquisition_timeout' : 'acquisition_failed';
+            await write("UPDATE workbench_runs SET status = 'failed', failure_code = ?, updated_at = ? WHERE owner_id = ? AND id = ? AND status = 'running'", failureCode, stamp(), ownerId, id);
+            return { run: await fullRun(await runRow(id)) };
           }
+          // Storage errors are not acquisition failures. If this write cannot
+          // be confirmed, return its safe storage error and preserve the record.
+          await write("UPDATE workbench_runs SET status = 'complete', revision = ?, result_json = ?, updated_at = ? WHERE owner_id = ? AND id = ? AND status = 'running'", stored.revision, JSON.stringify(stored), stamp(), ownerId, id);
           return { run: await fullRun(await runRow(id)) };
         }
         case 'run': return { run: await fullRun(await runRow(payload.runId)) };

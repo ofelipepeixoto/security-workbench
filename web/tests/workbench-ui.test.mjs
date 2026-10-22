@@ -232,3 +232,27 @@ test('missing findings are unavailable data rather than an empty successful resu
   assert.match(html, /Recarregar análise/);
   assert.doesNotMatch(html, /Nenhum candidato foi importado|ausência de candidatos/);
 });
+
+test('GitHub rate limiting explains the shared public quota and safe recovery', () => {
+  const run = importedRun({ source: 'github-public', status: 'failed', failure_code: 'github_rate_limited', findings: [] });
+  const html = component(RunOutcome, { run, demo: false, refreshHref: '/runs/synthetic-failed', onExport: () => {} });
+  assert.match(html, /limite de consultas públicas do GitHub foi atingido/);
+  assert.match(html, /cota é compartilhada por IP/);
+  assert.match(html, /Aguarde e consulte o histórico antes de tentar novamente/);
+  assert.doesNotMatch(html, /Nenhum candidato|Baixar Markdown|Revisar próximo candidato/);
+});
+
+test('acquisition timeout and generic failure never become a clean result or an invented cause', () => {
+  const renderFailure = failure_code => component(RunOutcome, { run: importedRun({ source: 'github-public', status: 'failed', failure_code, findings: [] }), demo: false });
+  const timeout = renderFailure('acquisition_timeout');
+  assert.match(timeout, /cobertura não foi concluída/);
+  assert.match(timeout, /não representa uma análise sem achados/);
+  assert.doesNotMatch(timeout, /Nenhum candidato|cota é compartilhada/);
+  const generic = renderFailure('acquisition_failed');
+  assert.match(generic, /A causa não foi confirmada/);
+  assert.match(generic, /Consulte o histórico antes de tentar novamente/);
+  assert.doesNotMatch(generic, /Nenhum candidato|cota é compartilhada|ultrapassou o tempo limite/);
+  // Legacy/unknown failure codes must not acquire a diagnosis retroactively.
+  assert.doesNotMatch(renderFailure('acquisition'), /cota é compartilhada|ultrapassou o tempo limite/);
+  assert.doesNotMatch(renderFailure('toString'), /cota é compartilhada|ultrapassou o tempo limite/);
+});

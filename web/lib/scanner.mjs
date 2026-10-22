@@ -15,6 +15,10 @@ export class GitHubRateLimitError extends Error {
   constructor() { super('A cota pública do GitHub foi atingida. Tente novamente mais tarde.'); this.name = 'GitHubRateLimitError'; }
 }
 
+export class GitHubAcquisitionTimeoutError extends Error {
+  constructor() { super('A leitura ultrapassou 45 segundos. Confira o histórico antes de tentar novamente.'); this.name = 'GitHubAcquisitionTimeoutError'; }
+}
+
 export function normalizeRepo(input) {
   if (typeof input !== "string" || input.length > 250) throw new Error("Informe o nome ou endereço do seu repositório GitHub.");
   let repo = input.trim();
@@ -57,7 +61,7 @@ function cancelStream(stream) {
 
 async function withTransport(fetcher, work) {
   const controller = new AbortController();
-  const timeoutError = new Error("A leitura ultrapassou 45 segundos. Nenhuma análise foi salva.");
+  const timeoutError = new GitHubAcquisitionTimeoutError();
   const timer = setTimeout(() => controller.abort(timeoutError), SCANNER_LIMITS.deadlineMs);
   const abort = new Promise((_, reject) => controller.signal.addEventListener("abort", () => reject(timeoutError), {once: true}));
   async function get(path) {

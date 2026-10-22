@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { createWorkbenchService, handleWorkbenchRequest, handleReaImportRequest } from '../lib/workbench-service.mjs';
 import { newReaImportAttemptTracker } from '../lib/rea-import-attempt.mjs';
+import { GitHubRateLimitError, GitHubAcquisitionTimeoutError, repositoryMetadata, SCANNER_LIMITS } from '../lib/scanner.mjs';
 
 const REPO = 'ofelipepeixoto/rea';
 const REVISION = 'a'.repeat(40);
@@ -290,6 +291,110 @@ test('failed acquisition stores a safe failure state and review/report remain un
   await assert.rejects(svc.act({ action: 'report', runId: run.id }), error => error.status === 409);
   await assert.rejects(svc.act({ action: 'review', runId: run.id, fingerprint: 'f1', decision: 'confirmed' }), error => error.status === 409);
   db.close();
+});
+
+test('failed scans persist only closed typed diagnostics and cannot infer a cause from messages or names', async t => {
+  const privateValue = 'private upstream URL/body/token diagnostic';
+  const cases = [
+    [new GitHubRateLimitError(), 'github_rate_limited'],
+    [new GitHubAcquisitionTimeoutError(), 'acquisition_timeout'],
+    [Object.assign(new Error(privateValue), {name: 'GitHubRateLimitError'}), 'acquisition_failed'],
+    [new Error('timeout rate limit ' + privateValue), 'acquisition_failed'],
+  ];
+  for (const [error, expectedCode] of cases) {
+    error.message = privateValue;
+    error.cause = {body: privateValue, url: privateValue};
+    const db = database();
+    t.after(() => db.close());
+    let calls = 0;
+    const mocked = scanner({ async inspectGitHub() { calls++; throw error; } });
+    const svc = createWorkbenchService({ db, ownerId: 'owner-a', scanner: mocked });
+    const project = await authorize(svc);
+    const payload = { action: 'scan', projectId: project.id, requestId: REQUEST, revision: REVISION };
+    const response = await handleWorkbenchRequest(request(payload), dependencies(db, {scanner: mocked}));
+    assert.equal(response.status, 200);
+    const {run} = await response.json();
+    assert.equal(run.status, 'failed');
+    assert.equal(run.failure_code, expectedCode);
+    assert.equal(JSON.stringify(run).includes(privateValue), false);
+    const stored = await db.prepare('SELECT result_json, failure_code, revision FROM workbench_runs WHERE id = ?').bind(run.id).first();
+    assert.equal(stored.result_json, null);
+    assert.equal(stored.revision, null);
+    assert.equal(stored.failure_code, expectedCode);
+    assert.equal((await svc.list()).runs[0].failure_code, expectedCode);
+    assert.equal((await svc.act(payload)).run.id, run.id);
+    assert.equal(calls, 1);
+    await assert.rejects(svc.act({action: 'report', runId: run.id}), error => error.status === 409);
+  }
+});
+
+test('the actual scanner deadline produces a typed timeout without a network call or automatic retry', async t => {
+  t.mock.timers.enable({apis: ['setTimeout']});
+  const db = database();
+  t.after(() => db.close());
+  let entered, requests = 0, aborted = false;
+  const started = new Promise(resolve => { entered = resolve; });
+  const mocked = scanner({
+    async inspectGitHub() {
+      return repositoryMetadata(REPO, {fetcher: async (_url, options) => {
+        requests++;
+        options.signal.addEventListener('abort', () => { aborted = true; }, {once: true});
+        entered();
+        return new Promise(() => {});
+      }});
+    },
+  });
+  const svc = createWorkbenchService({ db, ownerId: 'owner-a', scanner: mocked });
+  const project = await authorize(svc);
+  let settled = false;
+  const pending = svc.act({action: 'scan', projectId: project.id, requestId: REQUEST, revision: REVISION});
+  pending.finally(() => { settled = true; });
+  await started;
+  t.mock.timers.tick(SCANNER_LIMITS.deadlineMs - 1);
+  await Promise.resolve();
+  assert.equal(settled, false);
+  assert.equal(aborted, false);
+  t.mock.timers.tick(1);
+  const {run} = await pending;
+  assert.equal(run.status, 'failed');
+  assert.equal(run.failure_code, 'acquisition_timeout');
+  assert.equal(aborted, true);
+  assert.equal(requests, 1);
+});
+
+test('unconfirmed database writes never masquerade as acquisition failures or confirmed completion', async t => {
+  const privateValue = 'private database diagnostic';
+  for (const target of ['complete', 'failed']) {
+    for (const failure of ['throw', 'unconfirmed', 'response-lost-after-commit']) {
+      const db = database();
+      t.after(() => db.close());
+      let failedStateWrites = 0;
+      const storage = { ...db, prepare(query) { return { bind(...values) {
+        const bound = db.prepare(query).bind(...values);
+        return { ...bound, async run() {
+          const failureState = query.startsWith("UPDATE workbench_runs SET status = 'failed', failure_code = ?");
+          if (failureState) failedStateWrites++;
+          const selected = target === 'complete' ? query.startsWith("UPDATE workbench_runs SET status = 'complete'") : failureState;
+          if (!selected) return bound.run();
+          if (failure === 'response-lost-after-commit') await bound.run();
+          if (failure === 'unconfirmed') return {success: false};
+          throw new Error(privateValue);
+        }};
+      }}; }};
+      const mocked = scanner(target === 'failed' ? {async inspectGitHub() {throw new GitHubRateLimitError();}} : {});
+      const project = await authorize(createWorkbenchService({db: storage, ownerId: 'owner-a', scanner: mocked}));
+      const response = await handleWorkbenchRequest(request({action: 'scan', projectId: project.id, requestId: REQUEST}), dependencies(storage, {scanner: mocked}));
+      assert.equal(response.status, 503, `${target}/${failure}`);
+      const body = await response.json();
+      assert.match(body.error, /armazenamento não confirmou/);
+      assert.equal(JSON.stringify(body).includes(privateValue), false);
+      const stored = await db.prepare('SELECT status, failure_code, result_json FROM workbench_runs WHERE request_id = ?').bind(REQUEST).first();
+      assert.equal(stored.status, failure === 'response-lost-after-commit' ? target : 'running');
+      assert.equal(stored.failure_code, target === 'failed' && failure === 'response-lost-after-commit' ? 'github_rate_limited' : null);
+      assert.equal(stored.result_json === null, !(target === 'complete' && failure === 'response-lost-after-commit'));
+      assert.equal(failedStateWrites, target === 'failed' ? 1 : 0);
+    }
+  }
 });
 
 test('reviews are scoped to actual findings and comparison does not treat reviews as disappeared findings', async () => {

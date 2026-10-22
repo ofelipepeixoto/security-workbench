@@ -1,10 +1,18 @@
 import { env } from "cloudflare:workers";
-import { getWorkbenchAccess } from "../../workbench-identity";
+import { getWorkbenchAccess, githubConfig } from "../../workbench-identity";
+import { githubAppAuth } from "../../github-app";
 import { handleWorkbenchRequest } from "../../../lib/workbench-service.mjs";
 
 const dependencies = {
   get authorizedOwnerId() { return env.WORKBENCH_OWNER_ID; },
   getDb: () => env.DB,
+  get accessPolicy() { return githubConfig(); },
+  get githubApp() { return githubAppAuth(); },
+  get jobsEnabled() { return env.WORKBENCH_JOBS_ENABLED === "true" && Boolean(env.ANALYSIS_QUEUE); },
+  dispatchJob: async (message: {jobId: string}) => {
+    if (!env.ANALYSIS_QUEUE) throw new Error("Analysis dispatcher unavailable");
+    await env.ANALYSIS_QUEUE.send(message);
+  },
 };
 
 export async function GET(request: Request) {

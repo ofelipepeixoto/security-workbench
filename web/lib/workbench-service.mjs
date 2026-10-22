@@ -1,5 +1,8 @@
 import * as defaultScanner from './scanner.mjs';
 import { parseReaEvidence } from './rea-import.mjs';
+import { isWorkbenchUserAllowed } from './github-auth.mjs';
+import { GitHubAppError } from './github-app-client.mjs';
+import { createAnalysisJobs, AnalysisJobError } from './analysis-jobs.mjs';
 
 const MAX_BODY_BYTES = 8192;
 const MAX_REA_BODY_BYTES = 2 * 1024 * 1024 + MAX_BODY_BYTES;
@@ -12,7 +15,7 @@ const FINDING_RUN_LIMIT = 20;
 const FINDING_ROW_LIMIT = 500;
 
 export class WorkbenchError extends Error {
-  constructor(message, status = 400) { super(message); this.status = status; }
+  constructor(message, status = 400, code) { super(message); this.status = status; if (code === 'not_found') this.code = code; }
 }
 
 function identifier(value) {
@@ -66,6 +69,7 @@ async function parseBody(request, maxBytes = MAX_BODY_BYTES) {
 
 function publicProject(row) {
   return { id: row.id, repo: row.repo, repository_id: row.repository_id, authorized_at: row.authorized_at,
+    source: row.source ?? 'github-public', installation_id: row.installation_id ?? null, visibility: row.visibility ?? 'public',
     ...(row.has_runs === undefined ? {} : { has_runs: Boolean(row.has_runs) }) };
 }
 
@@ -76,7 +80,7 @@ function validateMetadata(metadata, repo, expectedId) {
   return metadata;
 }
 
-export function createWorkbenchService({ db, ownerId, scanner = defaultScanner, now = () => new Date(), uuid = () => crypto.randomUUID() }) {
+export function createWorkbenchService({ db, ownerId, user = { userId: ownerId }, githubApp, jobsEnabled = false, dispatchJob, scanner = defaultScanner, now = () => new Date(), uuid = () => crypto.randomUUID() }) {
   if (typeof ownerId !== 'string' || !ownerId) throw new WorkbenchError('Entre para acessar o Workbench.', 401);
   if (!db?.prepare) throw new WorkbenchError('O armazenamento está indisponível. Tente novamente mais tarde.', 503);
   const stamp = () => now().toISOString();
@@ -89,14 +93,41 @@ export function createWorkbenchService({ db, ownerId, scanner = defaultScanner, 
     if (saved?.success !== true) throw new WorkbenchError('O armazenamento não confirmou a operação. Confira o histórico antes de tentar novamente.', 503);
     return saved;
   };
+  const appEnabled = githubApp?.enabled === true;
+  let client;
+  const appClient = async () => {
+    if (!appEnabled) throw new WorkbenchError('Conexão de repositórios indisponível neste ambiente.', 503);
+    client ??= await githubApp.getClient(user);
+    return client;
+  };
+  const requireAccess = async (scope) => {
+    if (scope.source !== 'github-app') return scope;
+    try {
+      const access = await (await appClient()).authorizeRepository({installationId: scope.installation_id, repositoryId: scope.repository_id});
+      if (access.repository.id !== scope.repository_id) throw new WorkbenchError('Projeto não encontrado.', 404, 'not_found');
+      if (scope.revoked_at) {
+        await write('UPDATE workbench_projects SET revoked_at = NULL WHERE owner_id = ? AND id = ?', ownerId, scope.id);
+        return {...scope, revoked_at: null};
+      }
+      return scope;
+    } catch (error) {
+      // Denial reveals no repository name, result or cross-user metadata.
+      if (error instanceof GitHubAppError && ['disconnected','not_connected','expired','revoked','forbidden','suspended','not_found','insufficient_permission'].includes(error.code)) {
+        await write('UPDATE workbench_projects SET revoked_at = COALESCE(revoked_at, ?) WHERE owner_id = ? AND id = ?', stamp(), ownerId, scope.id);
+        throw new WorkbenchError('Projeto não encontrado ou acesso ao GitHub indisponível.', 404, 'not_found');
+      }
+      throw error;
+    }
+  };
   const project = async (id) => {
     const row = await first('SELECT * FROM workbench_projects WHERE owner_id = ? AND id = ?', ownerId, identifier(id));
-    if (!row) throw new WorkbenchError('Projeto não encontrado.', 404);
-    return row;
+    if (!row) throw new WorkbenchError('Projeto não encontrado.', 404, 'not_found');
+    return requireAccess(row);
   };
   const runRow = async (id) => {
     const row = await first('SELECT * FROM workbench_runs WHERE owner_id = ? AND id = ?', ownerId, identifier(id));
-    if (!row) throw new WorkbenchError('Análise não encontrada.', 404);
+    if (!row) throw new WorkbenchError('Análise não encontrada.', 404, 'not_found');
+    await project(row.project_id);
     return row;
   };
   const fullRun = async (row) => {
@@ -123,15 +154,85 @@ export function createWorkbenchService({ db, ownerId, scanner = defaultScanner, 
   };
   return {
     async list() {
-      const projects = await all('SELECT p.*, EXISTS(SELECT 1 FROM workbench_runs r WHERE r.owner_id = p.owner_id AND r.project_id = p.id) AS has_runs FROM workbench_projects p WHERE p.owner_id = ? ORDER BY p.authorized_at DESC LIMIT 100', ownerId);
-      const rows = await all('SELECT * FROM workbench_runs WHERE owner_id = ? ORDER BY created_at DESC LIMIT 100', ownerId);
-      return { projects: projects.map(publicProject), runs: rows.map(row => {
+      const candidates = await all('SELECT p.*, EXISTS(SELECT 1 FROM workbench_runs r WHERE r.owner_id = p.owner_id AND r.project_id = p.id) AS has_runs FROM workbench_projects p WHERE p.owner_id = ? ORDER BY p.authorized_at DESC LIMIT 100', ownerId);
+      const projects = [];
+      let accessRestricted = false;
+      for (const candidate of candidates) {
+        try { projects.push(await requireAccess(candidate)); }
+        catch (error) { if (error instanceof WorkbenchError && error.status === 404) accessRestricted = true; else throw error; }
+      }
+      const visible = new Set(projects.map(p => p.id));
+      const rows = (await all('SELECT * FROM workbench_runs WHERE owner_id = ? ORDER BY created_at DESC LIMIT 100', ownerId)).filter(r => visible.has(r.project_id));
+      return { ...(accessRestricted ? {access_restricted: true} : {}), projects: projects.map(publicProject), runs: rows.map(row => {
         const result = row.result_json ? JSON.parse(row.result_json) : null;
         return { id: row.id, project_id: row.project_id, repo: row.repo, status: row.status, revision: row.revision, files_read: result?.files_read ?? null, findings_count: result?.findings?.length ?? null, created_at: row.created_at, partial: result?.partial ?? null, failure_code: row.failure_code, source: result?.source ?? 'github-public' };
       }) };
     },
     async act(payload) {
       switch (payload.action) {
+        case 'catalog-status': {
+          return {catalog: {enabled: appEnabled, connection: appEnabled ? await githubApp.getConnection(user) : {state: 'unavailable'}, jobs_enabled: appEnabled && jobsEnabled === true && typeof dispatchJob === 'function', limits: defaultScanner.SCANNER_LIMITS}};
+        }
+        case 'catalog-installations': return (await appClient()).listInstallations({page: payload.page ?? 1});
+        case 'catalog-repositories': return (await appClient()).listRepositories({installationId: payload.installationId, page: payload.page ?? 1});
+        case 'catalog-authorize': {
+          const access = await (await appClient()).authorizeRepository({installationId: payload.installationId, repositoryId: payload.repositoryId, revision: payload.revision, branch: payload.branch});
+          const metadata = access.repository;
+          const existing = await first('SELECT * FROM workbench_projects WHERE owner_id = ? AND repository_id = ?', ownerId, metadata.id);
+          if (existing && existing.source !== 'github-app') throw new WorkbenchError('Este repositório já tem um projeto no piloto público. Preserve o histórico e revise a transição antes de conectá-lo pela App.', 409);
+          const id = existing?.id ?? uuid();
+          await write("INSERT INTO workbench_projects (id, owner_id, repo, repository_id, authorized_at, source, installation_id, visibility) VALUES (?, ?, ?, ?, ?, 'github-app', ?, ?) ON CONFLICT (owner_id, repository_id) DO UPDATE SET repo = excluded.repo, installation_id = excluded.installation_id, visibility = excluded.visibility, revoked_at = NULL",
+            id, ownerId, metadata.full_name, metadata.id, stamp(), payload.installationId, metadata.private ? 'private' : 'public');
+          const saved = await project(id);
+          return {project: publicProject(saved), repository: metadata, revision: access.revision, limits: defaultScanner.SCANNER_LIMITS};
+        }
+        case 'enqueue-job': {
+          if (!appEnabled || jobsEnabled !== true || typeof dispatchJob !== 'function') throw new WorkbenchError('A execução por jobs não está ativada neste ambiente.', 503);
+          if (payload.confirmed !== true || typeof payload.revision !== 'string' || !SHA.test(payload.revision)) throw new WorkbenchError('Confirme a análise de um commit válido.');
+          const scope = await project(payload.projectId);
+          if (scope.source !== 'github-app') throw new WorkbenchError('Selecione um repositório conectado pela GitHub App.', 409);
+          // The catalog is not a lasting authorization. Verify the pinned commit
+          // again before persisting any work; the consumer repeats this check.
+          const access = await (await appClient()).authorizeRepository({installationId: scope.installation_id, repositoryId: scope.repository_id, revision: payload.revision.toLowerCase()});
+          if (access.repository.id !== scope.repository_id || access.repository.full_name !== scope.repo || access.revision !== payload.revision.toLowerCase()) throw new WorkbenchError('O acesso ao commit não foi confirmado. Selecione o repositório novamente.', 409);
+          const jobs = createAnalysisJobs({db, ownerId, githubId: user.githubId, now, uuid});
+          const queued = await jobs.enqueue({project: scope, revision: payload.revision, requestId: payload.requestId, confirmed: payload.confirmed});
+          if (queued.job.status === 'queued') {
+            try { await dispatchJob({jobId: queued.job.id}); }
+            catch { return {...queued, dispatch_pending: true}; }
+          }
+          return queued;
+        }
+        case 'job':
+        case 'cancel-job': {
+          if (!appEnabled || jobsEnabled !== true) throw new WorkbenchError('A execução por jobs não está ativada neste ambiente.', 503);
+          const row = await first('SELECT * FROM workbench_analysis_jobs WHERE owner_id = ? AND id = ?', ownerId, identifier(payload.jobId));
+          if (!row) throw new WorkbenchError('Job não encontrado.', 404);
+          if (payload.action === 'job') await project(row.project_id);
+          const jobs = createAnalysisJobs({db, ownerId, githubId: user.githubId, now, uuid});
+          return payload.action === 'job' ? jobs.get(payload.jobId) : jobs.cancel(payload.jobId);
+        }
+        case 'delete-project': {
+          if (payload.confirmed !== true) throw new WorkbenchError('Confirme a exclusão do projeto e seus resultados.');
+          const id = identifier(payload.projectId);
+          const scope = await first('SELECT * FROM workbench_projects WHERE owner_id = ? AND id = ?', ownerId, id);
+          if (!scope || scope.source !== 'github-app') throw new WorkbenchError('Projeto não encontrado.', 404);
+          if (!db.batch) throw new WorkbenchError('O armazenamento transacional está indisponível.', 503);
+          // Keep the concurrency reservation while a cancelled consumer unwinds.
+          // Every statement checks inside the same transaction, avoiding a race
+          // between a separate preflight SELECT and a concurrent consumer claim.
+          const unlocked = "NOT EXISTS (SELECT 1 FROM workbench_analysis_jobs WHERE owner_id = ? AND project_id = ? AND lease_expires_at > ?)";
+          const deletionTime = stamp();
+          const deleted = await db.batch([
+            db.prepare(`DELETE FROM workbench_analysis_jobs WHERE owner_id = ? AND project_id = ? AND ${unlocked}`).bind(ownerId, id, ownerId, id, deletionTime),
+            db.prepare(`DELETE FROM workbench_reviews WHERE owner_id = ? AND run_id IN (SELECT id FROM workbench_runs WHERE owner_id = ? AND project_id = ?) AND ${unlocked}`).bind(ownerId, ownerId, id, ownerId, id, deletionTime),
+            db.prepare(`DELETE FROM workbench_runs WHERE owner_id = ? AND project_id = ? AND ${unlocked}`).bind(ownerId, id, ownerId, id, deletionTime),
+            db.prepare(`DELETE FROM workbench_projects WHERE owner_id = ? AND id = ? AND ${unlocked}`).bind(ownerId, id, ownerId, id, deletionTime),
+          ]);
+          if (!Array.isArray(deleted) || deleted.some(result => result?.success !== true)) throw new WorkbenchError('O armazenamento não confirmou a exclusão. Confira o histórico antes de tentar novamente.', 503);
+          if (deleted.at(-1)?.meta?.changes !== 1) throw new WorkbenchError('Aguarde o encerramento do consumidor antes de excluir este projeto.', 409);
+          return {deleted: true};
+        }
         case 'import-rea': {
           const scope = await project(payload.projectId);
           const requestId = identifier(payload.requestId);
@@ -176,8 +277,10 @@ export function createWorkbenchService({ db, ownerId, scanner = defaultScanner, 
           const rows = await all("SELECT * FROM workbench_runs WHERE owner_id = ? AND status = 'complete' ORDER BY created_at DESC, id DESC LIMIT ?", ownerId, FINDING_RUN_LIMIT + 1);
           const selected = rows.slice(0, FINDING_RUN_LIMIT);
           const findings = [];
-          let total = 0;
+          let total = 0, considered = 0, accessRestricted = false;
           for (const row of selected) {
+            try { await project(row.project_id); } catch (error) { if (error instanceof WorkbenchError && error.status === 404) { accessRestricted = true; continue; } throw error; }
+            considered++;
             const run = await fullRun(row);
             total += run.findings.length;
             for (const finding of run.findings) {
@@ -186,11 +289,12 @@ export function createWorkbenchService({ db, ownerId, scanner = defaultScanner, 
                 revision: row.revision, created_at: row.created_at, source: run.source ?? 'github-public' });
             }
           }
-          return { findings, runs_considered: selected.length,
+          return { findings, runs_considered: considered, ...(accessRestricted ? {access_restricted: true} : {}),
             truncated: rows.length > FINDING_RUN_LIMIT || total > FINDING_ROW_LIMIT,
             limits: { runs: FINDING_RUN_LIMIT, findings: FINDING_ROW_LIMIT } };
         }
         case 'inspect': {
+          if (user.role === 'member') throw new WorkbenchError('Conecte seus repositórios pela GitHub App.', 403);
           let repo;
           try { repo = scanner.normalizeRepo(payload.repo); }
           catch { throw new WorkbenchError('Informe um repositório público da conta ofelipepeixoto.'); }
@@ -203,6 +307,7 @@ export function createWorkbenchService({ db, ownerId, scanner = defaultScanner, 
           return { repository: { repo, id: metadata.repository_id, branch: metadata.default_branch, html_url: `https://github.com/${repo}` } };
         }
         case 'authorize': {
+          if (user.role === 'member') throw new WorkbenchError('Conecte seus repositórios pela GitHub App.', 403);
           if (payload.confirmed !== true) throw new WorkbenchError('Confirme que o repositório está no seu escopo autorizado.');
           let repo;
           try { repo = scanner.normalizeRepo(payload.repo); }
@@ -221,7 +326,9 @@ export function createWorkbenchService({ db, ownerId, scanner = defaultScanner, 
           return { project: publicProject(saved) };
         }
         case 'scan': {
+          if (user.role === 'member') throw new WorkbenchError('Use a fila da conexão GitHub App.', 403);
           const scope = await project(payload.projectId);
+          if (scope.source === 'github-app') throw new WorkbenchError('Use a fila da conexão GitHub App.', 403);
           const requestId = identifier(payload.requestId);
           const revision = payload.revision === undefined || payload.revision === null || payload.revision === '' ? null : payload.revision;
           if (revision !== null && (typeof revision !== 'string' || !SHA.test(revision))) throw new WorkbenchError('A revisão deve ser um SHA completo de 40 caracteres.');
@@ -258,7 +365,7 @@ export function createWorkbenchService({ db, ownerId, scanner = defaultScanner, 
               omissions: result.omissions, findings: result.findings, dependencies: result.dependencies,
               files_acquired: result.files_acquired, bytes_acquired: result.bytes_acquired, binary_skipped: result.binary_skipped,
               oversized_skipped: result.oversized_skipped, findings_total: result.findings_total, dependencies_total: result.dependencies_total,
-              source: result.source, verified_revision: result.verified_revision, limits: result.limits,
+              source: result.source, verified_revision: result.verified_revision, limits: result.limits, engine_version: result.engine_version, coverage: result.coverage,
             };
           } catch (error) {
             // Only trusted scanner error types select a public diagnostic.
@@ -306,12 +413,12 @@ export function createWorkbenchService({ db, ownerId, scanner = defaultScanner, 
   };
 }
 
-export async function handleWorkbenchRequest(request, { getUser, getDb, authorizedOwnerId, scanner = defaultScanner, now = () => new Date(), uuid = () => crypto.randomUUID() }, { reaImportOnly = false } = {}) {
+export async function handleWorkbenchRequest(request, { getUser, getDb, authorizedOwnerId, accessPolicy, githubApp, jobsEnabled = false, dispatchJob, scanner = defaultScanner, now = () => new Date(), uuid = () => crypto.randomUUID() }, { reaImportOnly = false } = {}) {
   try {
     const user = await getUser();
     if (!user?.userId) throw new WorkbenchError('Entre para acessar o Workbench.', 401);
     if (typeof authorizedOwnerId !== 'string' || !authorizedOwnerId.trim()) throw new WorkbenchError('Operação real indisponível: configuração do proprietário pendente.', 503);
-    if (user.userId !== authorizedOwnerId) throw new WorkbenchError('Operação real restrita ao proprietário.', 403);
+    if (accessPolicy?.multiUserEnabled === true ? !isWorkbenchUserAllowed(accessPolicy, user) : user.userId !== authorizedOwnerId) throw new WorkbenchError('Operação real restrita aos usuários autorizados deste ambiente.', 403);
     if (request.method !== 'GET' && request.method !== 'POST') throw new WorkbenchError('Método não permitido.', 405);
     if (reaImportOnly && request.method !== 'POST') throw new WorkbenchError('Método não permitido.', 405);
     if (request.method === 'POST' && user.provider === 'github' &&
@@ -323,10 +430,12 @@ export async function handleWorkbenchRequest(request, { getUser, getDb, authoriz
       if (payload.action !== undefined && payload.action !== 'import-rea') throw new WorkbenchError('Ação não permitida nesta rota.');
       payload.action = 'import-rea';
     }
-    const service = createWorkbenchService({ db: await getDb(), ownerId: user.userId, scanner, now, uuid });
+    const service = createWorkbenchService({ db: await getDb(), ownerId: user.userId, user, githubApp, jobsEnabled, dispatchJob, scanner, now, uuid });
     return response(request.method === 'GET' ? await service.list() : await service.act(payload));
   } catch (error) {
-    return response({ error: error instanceof WorkbenchError ? error.message : 'Não foi possível concluir a solicitação. Tente novamente.' }, error instanceof WorkbenchError ? error.status : 500);
+    if (error instanceof GitHubAppError) return response({error: error.message, code: error.code, ...(error.retryAt ? {retry_at: error.retryAt} : {})}, error.status);
+    if (error instanceof AnalysisJobError) return response({error: error.message, code: error.code}, error.status);
+    return response({ error: error instanceof WorkbenchError ? error.message : 'Não foi possível concluir a solicitação. Tente novamente.', ...(error instanceof WorkbenchError && error.code ? {code: error.code} : {}) }, error instanceof WorkbenchError ? error.status : 500);
   }
 }
 

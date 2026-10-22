@@ -1,0 +1,19 @@
+{
+  // Example only. No deploy/provisioning is authorized by this file.
+  "name": "security-workbench-analysis-qa",
+  "main": "analysis-consumer.mjs",
+  "compatibility_date": "2026-10-21",
+  "vars": {
+    "WORKBENCH_JOBS_ENABLED": "false",
+    "WORKBENCH_MULTIUSER_ENABLED": "false",
+    "GITHUB_APP_ENABLED": "false"
+  },
+  "d1_databases": [{"binding":"DB","database_name":"<approved-qa-d1>","database_id":"<approved-qa-d1-id>"}],
+  "queues": {
+    "producers": [{"binding":"ANALYSIS_QUEUE","queue":"<approved-qa-analysis-queue>"}],
+    "consumers": [{"queue":"<approved-qa-analysis-queue>","max_batch_size":2,"max_concurrency":2,"max_retries":2}]
+  },
+  "triggers": {"crons":["* * * * *"]}
+  // Login owner/ID/allowlist and App configuration must match the approved QA
+  // server. CLIENT_SECRET and TOKEN_KEY only through the approved secret store.
+}

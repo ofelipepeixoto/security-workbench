@@ -1,10 +1,12 @@
 /** Bounded, public GitHub acquisition. Rules/texts ported from Workbench PR #6. */
 const OWNER = "ofelipepeixoto";
 const API = "https://api.github.com";
+export const SCANNER_VERSION = "workbench-static/1.1";
+export const COVERAGE_POLICY = "workbench-files/1.1";
 export const SCANNER_LIMITS = Object.freeze({files: 20, bytes: 2 * 1024 * 1024, fileBytes: 256 * 1024, responseBytes: 4 * 1024 * 1024, deadlineMs: 45000, findings: 100, dependencies: 500});
 const SHA = /^[0-9a-fA-F]{40}$/;
 const SKIP_DIRS = new Set([".git", ".data", ".venv", "venv", "node_modules", "dist", "build", "__pycache__"]);
-const TEXT_EXTENSIONS = new Set([".py", ".js", ".jsx", ".ts", ".tsx", ".json", ".yml", ".yaml", ".txt", ".toml", ".ini", ".cfg"]);
+const TEXT_EXTENSIONS = new Set([".py", ".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".json", ".yml", ".yaml", ".txt", ".toml", ".ini", ".cfg"]);
 const ASSIGNMENT = /\b(api[_-]?key|access[_-]?token|secret|password|private[_-]?key)\b\s*[:=]\s*['"]([^'"\r\n]{8,})['"]/i;
 const PLACEHOLDER = /^(?:\$\{|<|your[_-]|changeme|example|placeholder|dummy|test[_-])/i;
 const SAFE_VERSION = /^(?:[A-Za-z0-9][A-Za-z0-9._+-]*|[0-9vVxX*^~<>=][0-9A-Za-z.*+^~<>=| -]*)$/;
@@ -131,17 +133,20 @@ function utf8Order(a, b) {
   return left.length - right.length;
 }
 function eligible(path) {
-  if (typeof path !== "string" || !path || path.length > 1024 || /[\\\x00-\x1f\x7f-\x9f\uD800-\uDFFF]/u.test(path)) return false;
+  if (typeof path !== "string" || !path || path.length > 1024 || /[\\\x00-\x1f\x7f-\x9f\uD800-\uDFFF]/u.test(path)) return "invalid_path";
   const parts = path.split("/");
-  if (parts.some((p) => !p || p === "." || p === "..") || parts.slice(0, -1).some((p) => SKIP_DIRS.has(p))) return false;
+  if (parts.some((p) => !p || p === "." || p === "..")) return "invalid_path";
+  if (parts.slice(0, -1).some((p) => SKIP_DIRS.has(p))) return "excluded_directory";
   const name = parts.at(-1);
-  if (name.startsWith(".env")) return false;
+  if (name.startsWith(".env")) return "excluded_environment";
   const dot = name.lastIndexOf(".");
   const extension = dot > 0 ? name.slice(dot).toLowerCase() : "";
-  return TEXT_EXTENSIONS.has(extension) || name === "requirements.txt" || name === "Dockerfile";
+  return TEXT_EXTENSIONS.has(extension) || name === "requirements.txt" || name === "Dockerfile" ? null : "unsupported_extension";
 }
 async function finding(kind, path, line, detail, evidence, impact, recommendation, confidence) {
-  return {fingerprint: hex(await hash("SHA-256", encoder.encode(`${kind}\0${path}\0${detail}`))).slice(0, 20), kind, path, line, status: "candidate", confidence, evidence, impact, recommendation};
+  return {fingerprint: hex(await hash("SHA-256", encoder.encode(`${kind}\0${path}\0${detail}`))).slice(0, 20), kind, path, line, status: "candidate", confidence, evidence, impact, recommendation,
+    tool: SCANNER_VERSION, rule_id: kind === "possible-secret" ? "SWB-TEXT-001/1" : "SWB-WORKFLOW-001/1", severity: "medium",
+    severity_reason: kind === "possible-secret" ? "Impacto potencial se o valor for uma credencial válida; validade e alcance não verificados." : "Permissão ampla pode aumentar o impacto de um workflow comprometido; gatilho e contexto exigem revisão."};
 }
 async function inspectText(path, text, remainingFindings, remainingDependencies) {
   const findings = [], dependencies = [];
@@ -184,10 +189,15 @@ export async function inspectGitHub(repo, boundRepositoryId, revision = null, {f
   boundRepositoryId = repositoryId(boundRepositoryId);
   if (revision !== null) revision = sha(revision);
   return withTransport(fetcher, async (get) => {
-    const prefix = `/repos/${repo}`;
-    const metadata = validateMetadata(await get(prefix), repo);
+    const metadata = validateMetadata(await get(`/repos/${repo}`), repo);
     if (metadata.repository_id !== boundRepositoryId) throw new Error("Identidade do repositório divergente do escopo autorizado.");
-    if (revision === null) revision = sha((await get(`${prefix}/commits/${encodeURIComponent(metadata.default_branch)}`)).sha);
+    const pinned = revision ?? sha((await get(`/repos/${repo}/commits/${encodeURIComponent(metadata.default_branch)}`)).sha);
+    return acquirePinned(repo, boundRepositoryId, pinned, get, "github-public");
+  });
+}
+
+async function acquirePinned(repo, boundRepositoryId, revision, get, source) {
+  const prefix = `/repos/${repo}`;
     const commit = await get(`${prefix}/git/commits/${revision}`);
     if (sha(commit.sha) !== revision) throw new Error("Commit divergente do solicitado.");
     const treeSha = sha(commit.tree?.sha);
@@ -196,12 +206,20 @@ export async function inspectGitHub(repo, boundRepositoryId, revision = null, {f
     if (listing.truncated !== true && listing.truncated !== false) throw new Error("Cobertura da árvore desconhecida.");
     if (listing.tree.some((item) => !item || typeof item !== "object" || Array.isArray(item) || typeof item.path !== "string")) throw new Error("Entrada inválida na árvore GitHub.");
     const omissions = [], findings = [], dependencies = [], digestParts = [], seen = new Set();
+    const exclusions = {};
+    for (const item of listing.tree) {
+      if (item.type === "tree") continue;
+      const excluded = eligible(item.path);
+      if (excluded) exclusions[excluded] = (exclusions[excluded] ?? 0) + 1;
+    }
     let filesRead = 0, bytesRead = 0, filesAcquired = 0, bytesAcquired = 0, binarySkipped = 0, overSizeSkipped = 0;
     let findingsTotal = 0, dependenciesTotal = 0;
     if (listing.truncated) omissions.push("Árvore GitHub truncada; cobertura parcial.");
     for (const item of [...listing.tree].sort((a, b) => utf8Order(a.path, b.path))) {
       const path = item.path;
-      if (!eligible(path)) continue;
+      if (item.type === "tree") continue;
+      const excluded = eligible(path);
+      if (excluded) continue;
       if (seen.has(path)) throw new Error("Caminho duplicado na árvore.");
       seen.add(path);
       if (item.type !== "blob" || !["100644", "100755"].includes(item.mode)) {omissions.push(`${path}: tipo não regular`); continue;}
@@ -223,10 +241,42 @@ export async function inspectGitHub(repo, boundRepositoryId, revision = null, {f
       dependencies.push(...inspected.dependencies);
     }
     if ((filesAcquired >= SCANNER_LIMITS.files || bytesAcquired >= SCANNER_LIMITS.bytes) && !omissions.some((x) => x.startsWith("Limite web"))) omissions.push("Limite web de 20 arquivos ou 2 MiB atingido; cobertura parcial.");
+    const excludedCount = Object.values(exclusions).reduce((a, b) => a + b, 0);
+    if (excludedCount) omissions.push(`${excludedCount} arquivos fora da política de cobertura; contagens por motivo disponíveis nos detalhes.`);
     if (findingsTotal > findings.length) omissions.push("Limite de 100 candidatos no piloto web; cobertura parcial de achados.");
     if (dependenciesTotal > dependencies.length) omissions.push("Limite de 500 dependências no piloto web; inventário parcial.");
-    return {revision, repository_id: boundRepositoryId, snapshot_digest: hex(await hash("SHA-256", concat(digestParts))), files_read: filesRead, bytes_read: bytesRead, files_acquired: filesAcquired, bytes_acquired: bytesAcquired, binary_skipped: binarySkipped, oversized_skipped: overSizeSkipped, findings_total: findingsTotal, dependencies_total: dependenciesTotal, partial: omissions.length > 0, omissions: omissions.slice(0, 50), findings, dependencies, source: "github-public", verified_revision: true, limits: SCANNER_LIMITS};
-  });
+    return {revision, repository_id: boundRepositoryId, snapshot_digest: hex(await hash("SHA-256", concat(digestParts))), files_read: filesRead, bytes_read: bytesRead, files_acquired: filesAcquired, bytes_acquired: bytesAcquired, binary_skipped: binarySkipped, oversized_skipped: overSizeSkipped, findings_total: findingsTotal, dependencies_total: dependenciesTotal, partial: omissions.length > 0, omissions: omissions.slice(0, 50), findings, dependencies, source, verified_revision: true, limits: SCANNER_LIMITS, engine_version: SCANNER_VERSION, coverage: {policy: COVERAGE_POLICY, exclusions_by_reason: exclusions, files_excluded: excludedCount, dependency_analysis: "inventory_only", advisory_coverage: "unavailable"}};
+ }
+
+/** Server-only App adapter: identity/permission is revalidated through the user
+ * access token. No target scripts, package installation or raw URLs are used. */
+export async function inspectGitHubApp({client, installationId, repositoryId: expectedId, revision}) {
+  expectedId = repositoryId(expectedId);
+  revision = sha(revision);
+  if (!client?.authorizeRepository || !client?.readTree || !client?.readBlob) throw new Error("Transporte autorizado indisponível.");
+  let timer, closed = false;
+  const timeout = new Promise((_, reject) => { timer = setTimeout(() => { closed = true; reject(new GitHubAcquisitionTimeoutError()); }, SCANNER_LIMITS.deadlineMs); });
+  const work = async () => {
+    const authorized = await client.authorizeRepository({installationId, repositoryId: expectedId, revision});
+    const repo = authorized.repository?.full_name;
+    if (authorized.repository?.id !== expectedId || authorized.revision !== revision || typeof repo !== "string" || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo) || repo.includes("..")) throw new Error("Identidade autorizada divergente.");
+    const treeSha = sha(authorized.tree_sha), prefix = `/repos/${repo}`;
+    const get = async (path) => {
+      if (closed) throw new GitHubAcquisitionTimeoutError();
+      if (path === `${prefix}/git/commits/${revision}`) return {sha: revision, tree: {sha: treeSha}};
+      if (path === `${prefix}/git/trees/${treeSha}?recursive=1`) return client.readTree({installationId, repositoryId: expectedId, treeSha});
+      const blobPrefix = `${prefix}/git/blobs/`;
+      if (path.startsWith(blobPrefix) && SHA.test(path.slice(blobPrefix.length))) return client.readBlob({installationId, repositoryId: expectedId, blobSha: path.slice(blobPrefix.length)});
+      throw new Error("Recurso fora do transporte autorizado.");
+    };
+    const result = await acquirePinned(repo, expectedId, revision, get, "github-app");
+    if (closed) throw new GitHubAcquisitionTimeoutError();
+    // Permissions, rename, transfer and visibility can change during acquisition.
+    const current = await client.authorizeRepository({installationId, repositoryId: expectedId, revision});
+    if (current.repository?.full_name !== repo || current.repository?.private !== authorized.repository.private || current.revision !== revision) throw new Error("O acesso mudou durante a análise.");
+    return result;
+  };
+  try {return await Promise.race([work(), timeout]);} finally {closed = true; clearTimeout(timer);}
 }
 
 // Escape Markdown syntax and HTML in all untrusted fields, including backticks,
@@ -241,10 +291,11 @@ export function renderReport(run) {
     `Contrato de importação: ${markdown(run.provenance?.schema)}`,
     `Commit de referência do contrato REA: ${markdown(run.provenance?.contract_source_commit)}`, "",
     "A importação valida uma projeção estática do JSON fornecido pelo operador. O Workbench não executou o REA, não autenticou seu produtor e não comprovou o isolamento, os bytes dos artefatos ou o vínculo com o commit. Observações estruturais não são vulnerabilidades confirmadas.", "");
-  else lines.push("Piloto web: apenas repositórios públicos de ofelipepeixoto; até 20 arquivos, 2 MiB no total e 256 KiB por arquivo. Não executa código do alvo.", "");
+  else lines.push(run.source === "github-app" ? "Aquisição GitHub App: interseção entre acesso do usuário e da instalação; até 20 arquivos, 2 MiB e 256 KiB por arquivo. Não executa código do alvo." : "Piloto web: apenas repositórios públicos de ofelipepeixoto; até 20 arquivos, 2 MiB no total e 256 KiB por arquivo. Não executa código do alvo.", "");
+  if (run.engine_version) lines.push(`Motor: ${markdown(run.engine_version)} · política: ${markdown(run.coverage?.policy)}`, "Cobertura de advisories/CVEs: indisponível; inventário não é correlação de vulnerabilidades.", "");
   lines.push("## Achados", "");
   if (!run.findings?.length) lines.push("Nenhum candidato nos arquivos lidos.");
-  for (const item of run.findings || []) lines.push(`### ${markdown(item.kind)} · ${markdown(item.fingerprint)}`, "", `Local: ${markdown(item.path)}:${markdown(item.line)} · estado: ${markdown(item.status)} · confiança: ${markdown(item.confidence)}`, "", `Evidência: ${markdown(item.evidence)}`, "", `Impacto possível: ${markdown(item.impact)}`, "", `Recomendação: ${markdown(item.recommendation)}`, "");
+  for (const item of run.findings || []) lines.push(`### ${markdown(item.kind)} · ${markdown(item.fingerprint)}`, "", `Local: ${markdown(item.path)}:${markdown(item.line)} · estado: ${markdown(item.status)} · confiança: ${markdown(item.confidence)}`, "", `Regra: ${markdown(item.rule_id || "não registrada")} · severidade potencial: ${markdown(item.severity || "não registrada")}`, `Justificativa: ${markdown(item.severity_reason || "não registrada")}`, "", `Evidência: ${markdown(item.evidence)}`, "", `Impacto possível: ${markdown(item.impact)}`, "", `Recomendação: ${markdown(item.recommendation)}`, "");
   lines.push("## Inventário de dependências (sem análise de CVEs)", "");
   if (!run.dependencies?.length) lines.push("Nenhuma dependência reconhecida nos manifestos suportados.");
   for (const item of run.dependencies || []) lines.push(`- ${markdown(item.name)} ${markdown(item.version)} (${markdown(item.source)})`);

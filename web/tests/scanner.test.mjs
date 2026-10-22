@@ -1,7 +1,7 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
 import {createHash} from "node:crypto";
-import {normalizeRepo, repositoryMetadata, inspectGitHub, renderReport, SCANNER_LIMITS} from "../lib/scanner.mjs";
+import {normalizeRepo, repositoryMetadata, inspectGitHub, renderReport, SCANNER_LIMITS, SCANNER_VERSION} from "../lib/scanner.mjs";
 
 const REPO = "ofelipepeixoto/rea";
 const REVISION = "a".repeat(40), TREE = "b".repeat(40), ID = 1234;
@@ -142,7 +142,16 @@ test("matches Python fixture fingerprints, redacted evidence, groups and snapsho
   const result = await inspectGitHub(REPO, ID, REVISION, apiFixture(PYTHON_FIXTURE));
   assert.equal(result.snapshot_digest, "04500d923b6c69dbbe95e40115cbf76024757c45c7e2bc09a1eecec56b2fc366");
   assert.equal(result.bytes_read, 231);
-  assert.deepEqual(result.findings, [
+  // The semantic findings remain compatible with Python; the web engine adds
+  // versioned rule/severity metadata without changing fingerprints or evidence.
+  const semanticFindings = result.findings.map(({tool, rule_id, severity, severity_reason, ...finding}) => {
+    assert.equal(tool, SCANNER_VERSION);
+    assert.match(rule_id, /^SWB-(TEXT|WORKFLOW)-001\/1$/);
+    assert.equal(severity, "medium");
+    assert.match(severity_reason, /revisão|verificados/);
+    return finding;
+  });
+  assert.deepEqual(semanticFindings, [
     {fingerprint: "5043a039b349ac5a3e2f", kind: "broad-workflow-permissions", path: ".github/workflows/ci.yml", line: 1, status: "candidate", confidence: "high", evidence: "Declaração permissions: write-all em .github/workflows/ci.yml:1.", impact: "Um workflow comprometido pode obter permissões amplas, conforme seu gatilho e contexto.", recommendation: "Revisar o gatilho e conceder apenas permissões específicas necessárias."},
     {fingerprint: "19de7dc085801c2d6085", kind: "possible-secret", path: "src/main.py", line: 1, status: "candidate", confidence: "medium", evidence: "Atribuição a password com valor [REDACTED] em src/main.py:1.", impact: "Uma credencial real exposta pode permitir acesso indevido; a validade não foi verificada.", recommendation: "Revisar o valor fora do relatório; se for real, revogá-lo e removê-lo do histórico com procedimento controlado."}
   ]);

@@ -38,6 +38,9 @@ class ReaImportTest(unittest.TestCase):
         self.assertEqual(result["provenance"]["report_sha256"], hashlib.sha256(raw).hexdigest())
         self.assertFalse(result["provenance"]["execution_verified"])
         self.assertFalse(result["provenance"]["network_isolation_verified"])
+        self.assertEqual(result["provenance"]["native_findings_declared"], 1)
+        self.assertEqual(result["provenance"]["observations_imported"], 1)
+        self.assertEqual(result["provenance"]["observations_omitted_by_reason"], {})
         projected = json.dumps(result)
         for sensitive in ["inert-secret", "example.invalid", "/synthetic/private-input", "SystemExit"]:
             self.assertNotIn(sensitive, projected)
@@ -115,6 +118,67 @@ class ReaImportTest(unittest.TestCase):
         self.assertEqual(result["findings"], [])
         self.assertEqual(result["provenance"]["observations_omitted"], 1)
 
+    def test_omission_reasons_account_for_observations_without_retaining_external_values(self):
+        graph = self.evidence["normalized_result"]["graph"]
+        observations = graph["nodes"][0]["observations"]
+        original = copy.deepcopy(observations[0])
+        observations.append(copy.deepcopy(original))
+        mutations = [
+            lambda fact: fact.update(authority="private-authority-value"),
+            lambda fact: fact.update(state="private-state-value"),
+            lambda fact: fact["artifact"].update(available=False),
+            lambda fact: fact["location"]["value"].update(kind="private-location-value"),
+        ]
+        for mutate in mutations:
+            item = copy.deepcopy(original)
+            item["observation_id"] = "jag_observation_" + f"{len(observations):064x}"
+            mutate(item["evidence"])
+            observations.append(item)
+        graph["nodes"].append({"node_id": "jag_node_" + "4" * 64, "kind": "private-kind-value", "observations": [original]})
+        result = parse_rea_evidence(encoded(self.evidence))
+        provenance = result["provenance"]
+        self.assertEqual(provenance["native_findings_declared"], 1)
+        self.assertEqual(provenance["observations_seen"], 7)
+        self.assertEqual(provenance["observations_imported"], 1)
+        self.assertEqual(provenance["observations_omitted"], 6)
+        self.assertEqual(provenance["observations_omitted_by_reason"], {
+            "unsupported_node_kind": 1, "unsupported_evidence_authority": 1,
+            "unsupported_evidence_state": 1, "artifact_or_location_unavailable": 1,
+            "unsupported_location_kind": 1, "duplicate_observation": 1,
+        })
+        self.assertEqual(sum(provenance["observations_omitted_by_reason"].values()), provenance["observations_omitted"])
+        self.assertIn("Motivos de omissão: tipo de nó fora da projeção: 1", "\n".join(result["omissions"]))
+        for value in ["private-authority-value", "private-state-value", "private-location-value", "private-kind-value"]:
+            self.assertNotIn(value, json.dumps(result))
+
+    def test_native_findings_do_not_equal_imported_graph_observations_and_legacy_runs_remain_readable(self):
+        node = self.evidence["normalized_result"]["graph"]["nodes"][0]
+        node["kind"] = "javascript-asset"
+        node["observations"] = [copy.deepcopy(node["observations"][0]) for _ in range(4)]
+        result = parse_rea_evidence(encoded(self.evidence))
+        self.assertEqual(result["provenance"]["native_findings_declared"], 1)
+        self.assertEqual(result["provenance"]["observations_seen"], 4)
+        self.assertEqual(result["provenance"]["observations_imported"], 0)
+        self.assertEqual(result["findings"], [])
+        self.assertEqual(result["provenance"]["observations_omitted"], 4)
+        self.assertEqual(result["provenance"]["observations_omitted_by_reason"], {"unsupported_node_kind": 4})
+        # Old stored projections have no reason counts; reading/reporting must
+        # not invent those new fields or require another import of the report.
+        for key in ["native_findings_declared", "observations_imported", "observations_omitted_by_reason"]:
+            del result["provenance"][key]
+        result["omissions"] = result["omissions"][:2] + [
+            "Projeção limitada: 4 observações não importadas; 0 falhas de parse declaradas. Não avalia CVEs nem executa o alvo.",
+        ]
+        result["repository_id"] = 1417322346
+        db = connect(self.base / "legacy.sqlite3")
+        self.addCleanup(db.close)
+        authorize(db, "ofelipepeixoto/rea", 1417322346)
+        run_id = save_run(db, "ofelipepeixoto/rea", "a" * 40, result, source="rea-import")
+        legacy = get_run(db, run_id)
+        self.assertEqual(legacy["provenance"]["observations_omitted"], 4)
+        self.assertNotIn("observations_omitted_by_reason", legacy["provenance"])
+        self.assertIn("Proveniência REA importada", render_report(legacy))
+
     def test_surrogate_pairs_are_valid_but_orphan_surrogates_in_keys_are_not(self):
         text = '{"ignored":"' + '\\ud83d\\ude00' * 16384 + '",' + encoded(self.evidence).decode()[1:]
         self.assertEqual(len(parse_rea_evidence(text.encode())["findings"]), 1)
@@ -132,6 +196,9 @@ class ReaImportTest(unittest.TestCase):
         result = parse_rea_evidence(encoded(self.evidence))
         self.assertEqual(len(result["findings"]), 100)
         self.assertEqual(result["provenance"]["observations_omitted"], 5)
+        self.assertEqual(result["provenance"]["observations_imported"], 100)
+        self.assertEqual(result["provenance"]["observations_seen"], 105)
+        self.assertEqual(result["provenance"]["observations_omitted_by_reason"], {"candidate_limit": 5})
         self.assertTrue(all(item["status"] == "candidate" for item in result["findings"]))
 
     def test_reader_rejects_links_nonregular_and_oversize_without_following(self):

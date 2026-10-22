@@ -4,6 +4,15 @@ const MAX_VALUES = 25000, MAX_DEPTH = 32, MAX_STRING = 16384;
 const SOURCE_COMMIT = '3e7c6302233ecbcb9b92e43ee5a60337738961bd';
 const STRUCTURAL_KINDS = new Set(['endpoint', 'storage', 'worker', 'service-worker', 'context-bridge-api', 'ipc-handler', 'browser-window']);
 const STATIC_AUTHORITIES = new Set(['ast-static-analysis', 'static-relationship-inference']);
+const OMISSION_REASONS = {
+  unsupported_node_kind: 'tipo de nó fora da projeção',
+  unsupported_evidence_authority: 'autoridade da evidência fora do subconjunto estático',
+  unsupported_evidence_state: 'estado da evidência não aceito',
+  artifact_or_location_unavailable: 'artefato ou localização indisponível',
+  unsupported_location_kind: 'localização sem intervalo de fonte',
+  duplicate_observation: 'observação duplicada',
+  candidate_limit: 'limite de candidatos',
+};
 const encoder = new TextEncoder();
 const invalid = () => new Error('Evidence REA inválido ou fora dos limites de importação.');
 const hash = async bytes => [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(byte => byte.toString(16).padStart(2, '0')).join('');
@@ -154,13 +163,15 @@ async function project(data) {
   const statistics = object(result.statistics), files = count(statistics.relevant_files, 5000);
   const parsed = count(statistics.parsed_javascript_files, files), failures = count(statistics.parse_failures, files);
   const byteCount = count(statistics.text_bytes_read, 25 * 1024 * 1024);
-  count(statistics.findings, 1000000);
+  const nativeFindings = count(statistics.findings, 1000000);
   const graph = object(result.graph);
   if (graph.schema !== 'JavaScriptApplicationGraph') throw invalid();
   const declaredCoverage = coverage(graph.coverage), nodes = graph.nodes;
   if (!Array.isArray(nodes) || nodes.length < 1 || nodes.length > 1000) throw invalid();
   const findings = [], seen = new Set(), nodeIds = new Set();
+  const omissionCounts = Object.fromEntries(Object.keys(OMISSION_REASONS).map(reason => [reason, 0]));
   let observed = 0, omitted = 0;
+  const omit = reason => { omitted++; omissionCounts[reason]++; };
   for (const rawNode of nodes) {
     const node = object(rawNode), nodeId = digest(node.node_id, 'jag_node_');
     if (nodeIds.has(nodeId) || typeof node.kind !== 'string') throw invalid();
@@ -170,25 +181,26 @@ async function project(data) {
     if (observed > 2000) throw invalid();
     for (const rawObservation of node.observations) {
       const observation = object(rawObservation), kind = node.kind;
-      if (!STRUCTURAL_KINDS.has(kind)) { omitted++; continue; }
+      if (!STRUCTURAL_KINDS.has(kind)) { omit('unsupported_node_kind'); continue; }
       const fact = object(observation.evidence);
       if (typeof fact.authority !== 'string' || typeof fact.state !== 'string') throw invalid();
-      if (!STATIC_AUTHORITIES.has(fact.authority) || !['observed', 'inferred'].includes(fact.state)) { omitted++; continue; }
+      if (!STATIC_AUTHORITIES.has(fact.authority)) { omit('unsupported_evidence_authority'); continue; }
+      if (!['observed', 'inferred'].includes(fact.state)) { omit('unsupported_evidence_state'); continue; }
       const observationId = digest(observation.observation_id, 'jag_observation_');
       const artifact = object(fact.artifact), location = object(fact.location);
-      if (artifact.available !== true || location.available !== true) { omitted++; continue; }
+      if (artifact.available !== true || location.available !== true) { omit('artifact_or_location_unavailable'); continue; }
       const artifactDigest = digest(artifact.sha256);
       if (artifact.artifact_id !== `art_${artifactDigest}`) throw invalid();
       const place = object(location.value);
-      if (place.kind !== 'source-range') { omitted++; continue; }
+      if (place.kind !== 'source-range') { omit('unsupported_location_kind'); continue; }
       const path = relativePath(place.source), start = object(place.start), end = object(place.end);
       const line = count(start.line, 10000000), last = count(end.line, 10000000);
       const column = count(start.column, 10000000), lastColumn = count(end.column, 10000000);
       if (line < 1 || last < line || (last === line && lastColumn < column)) throw invalid();
       const identity = `rea-structural-${kind}\0${path}\0${observationId}`;
-      if (seen.has(identity)) continue;
+      if (seen.has(identity)) { omit('duplicate_observation'); continue; }
       seen.add(identity);
-      if (findings.length >= 100) { omitted++; continue; }
+      if (findings.length >= 100) { omit('candidate_limit'); continue; }
       const token = (await hash(encoder.encode(identity))).slice(0, 20);
       findings.push({
         fingerprint: token, kind: `rea-structural-${kind}`, path, line, status: 'candidate', confidence: 'low',
@@ -199,18 +211,23 @@ async function project(data) {
     }
   }
   if (!Array.isArray(graph.root_node_ids) || graph.root_node_ids.length < 1 || graph.root_node_ids.length > 32 || graph.root_node_ids.some(root => !nodeIds.has(root))) throw invalid();
+  const omittedByReason = Object.fromEntries(Object.entries(omissionCounts).filter(([, amount]) => amount > 0));
+  const reasonSummary = Object.entries(omittedByReason).map(([reason, amount]) => `${OMISSION_REASONS[reason]}: ${amount}`).join('; ');
   return {
     snapshot_digest: rootDigest, files_read: parsed, bytes_read: byteCount, partial: true, dependencies: [], findings,
     omissions: [
       'REA importado: execução, isolamento, origem e vínculo com o commit não foram comprovados pelo Workbench.',
       'Cobertura e hashes do artefato são declarados no JSON; assinaturas e digests internos do REA não foram autenticados.',
-      `Projeção limitada: ${omitted} observações não importadas; ${failures} falhas de parse declaradas. Não avalia CVEs nem executa o alvo.`,
+      `Projeção limitada: ${findings.length} observações importadas; ${omitted} observações não importadas; ${failures} falhas de parse declaradas. Não avalia CVEs nem executa o alvo.`,
+      ...(reasonSummary ? [`Motivos de omissão: ${reasonSummary}.`] : []),
     ],
     provenance: {
       schema: 'security-workbench.rea-import/v1', report_sha256: await hash(data), evidence_id_declared: evidenceId,
       root_artifact_sha256_declared: rootDigest, contract_source_commit: SOURCE_COMMIT,
       contract_source_package_version: '6.4.0', provider_contract_version: '1', coverage_declared: declaredCoverage,
-      relevant_files_declared: files, observations_seen: observed, observations_omitted: omitted,
+      relevant_files_declared: files, native_findings_declared: nativeFindings,
+      observations_seen: observed, observations_imported: findings.length, observations_omitted: omitted,
+      observations_omitted_by_reason: omittedByReason,
       execution_verified: false, network_isolation_verified: false, artifact_bytes_verified: false,
     },
   };

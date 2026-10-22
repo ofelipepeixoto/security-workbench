@@ -4,7 +4,7 @@ import { resolveWorkbenchIdentity } from '../lib/workbench-access.mjs';
 
 const ORIGIN = 'https://workbench.example';
 const config = { enabled: true, origin: ORIGIN, clientId: 'inert_client', clientSecret: 'inert_client_secret', githubOwnerId: '101', workbenchOwnerId: 'existing-site-owner' };
-const githubSession = { userId: config.workbenchOwnerId, displayName: 'fixture-owner', provider: 'github', csrfToken: 'x'.repeat(43) };
+const githubSession = { userId: config.workbenchOwnerId, githubId: '101', role: 'admin', displayName: 'fixture-owner', provider: 'github', csrfToken: 'x'.repeat(43) };
 const request = () => new Request(`${ORIGIN}/api/workbench`, { headers: {
   'oai-authenticated-user-id': config.workbenchOwnerId,
   'oai-authenticated-user-email': 'owner@example.invalid',
@@ -29,7 +29,7 @@ test('validated GitHub identity preserves the existing canonical owner and no ex
     return { ...githubSession, accessToken: 'inert_provider_token', opaqueSession: 'inert_cookie', email: 'owner@example.invalid' };
   } });
   assert.deepEqual(identity, githubSession);
-  assert.deepEqual(Object.keys(identity).sort(), ['csrfToken', 'displayName', 'provider', 'userId']);
+  assert.deepEqual(Object.keys(identity).sort(), ['csrfToken', 'displayName', 'githubId', 'provider', 'role', 'userId']);
 });
 
 test('non-GitHub identities are rejected even when their user ID matches the configured owner', async () => {
@@ -67,9 +67,23 @@ test('missing or malformed requests and foreign origins never reach session stor
 });
 
 test('malformed session identity and absent session adapter fail closed', async () => {
-  for (const extra of [{ csrfToken: '' }, { csrfToken: 'invalid' }, { displayName: '' }, { displayName: null }]) {
+  for (const extra of [{ csrfToken: '' }, { csrfToken: 'invalid' }, { displayName: '' }, { displayName: null }, {githubId: undefined}, {githubId: 101}, {githubId: '202'}, {role: 'member'}, {role: undefined}]) {
     assert.equal(await resolveWorkbenchIdentity({ config, request: request(), getGitHubSession: async () => ({ ...githubSession, ...extra }) }), null);
   }
   assert.equal(await resolveWorkbenchIdentity({ config, request: request() }), null);
   assert.equal(await resolveWorkbenchIdentity(), null);
+});
+
+test('pilot access needs both server activation and the exact stable-ID principal without admin promotion', async () => {
+  const pilot = {...config, multiUserEnabled: true, allowedGitHubIds: ['202', '303']};
+  const member = {...githubSession, userId: 'github:202', githubId: '202', role: 'member', displayName: 'fixture-member'};
+  const resolve = (settings, session = member) => resolveWorkbenchIdentity({config: settings, request: request(), getGitHubSession: async () => session});
+  assert.deepEqual(await resolve(pilot), member);
+  assert.equal(await resolve(config), null);
+  assert.equal(await resolve({...pilot, multiUserEnabled: false}), null);
+  assert.equal(await resolve({...pilot, allowedGitHubIds: ['303']}), null);
+  for (const extra of [{role: 'admin'}, {userId: config.workbenchOwnerId}, {githubId: '303'}, {githubId: 'fixture-owner'}, {provider: 'chatgpt'}]) {
+    assert.equal(await resolve(pilot, {...member, ...extra}), null);
+  }
+  assert.deepEqual(await resolve(pilot, githubSession), githubSession);
 });

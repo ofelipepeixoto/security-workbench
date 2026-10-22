@@ -217,6 +217,64 @@ export function createGitHubAppClient({ accessToken, expectedGitHubId, appId, fe
     return repositoryPage(installationId, page);
   }
 
+  /** Fresh access-only snapshot for one operation, never shared across users or
+   * requests. Each installation/repository page is fetched at most once here.
+   * No commit is needed to decide whether stored history can be disclosed.
+   */
+  async function checkRepositoriesAccess(scopes) {
+    if (!Array.isArray(scopes) || scopes.length > 100) throw new GitHubAppError('invalid_request', 400);
+    const wanted = scopes.map(scope => ({ installationId: id(scope?.installationId), repositoryId: id(scope?.repositoryId) }));
+    if (!wanted.length) return [];
+    const groups = new Map();
+    for (const scope of wanted) {
+      if (!groups.has(scope.installationId)) groups.set(scope.installationId, new Set());
+      groups.get(scope.installationId).add(scope.repositoryId);
+      // Never leave a previous positive grant usable after a denied refresh.
+      authorized.delete(`${scope.installationId}:${scope.repositoryId}`);
+    }
+    const installations = new Map();
+    let page = 1, complete = false;
+    for (let index = 0; index < maxPages; index++) {
+      const result = await listInstallations({ page });
+      for (const row of result.installations) if (groups.has(row.id)) {
+        if (installations.has(row.id)) throw new GitHubAppError('unavailable');
+        installations.set(row.id, row);
+      }
+      if (!result.next_page) { complete = true; break; }
+      if ([...groups.keys()].every(key => installations.has(key))) break;
+      page = result.next_page;
+    }
+    if (!complete && [...groups.keys()].some(key => !installations.has(key))) throw new GitHubAppError('incomplete', 409);
+    const grants = new Map();
+    for (const [installationId, targets] of groups) {
+      const installation = installations.get(installationId);
+      if (!installation || installation.state === 'suspended' || !['read', 'write'].includes(installation.permissions.contents)) continue;
+      let page = 1, complete = false;
+      const found = new Set();
+      for (let index = 0; index < maxPages; index++) {
+        const result = await repositoryPage(installationId, page);
+        for (const row of result.repositories) if (targets.has(row.id)) {
+          if (found.has(row.id)) throw new GitHubAppError('unavailable');
+          found.add(row.id);
+          if (row.permissions.pull && !row.disabled) grants.set(`${installationId}:${row.id}`, row);
+        }
+        if (!result.next_page) { complete = true; break; }
+        if ([...targets].every(key => found.has(key))) break;
+        page = result.next_page;
+      }
+      if (!complete && [...targets].some(key => !found.has(key))) throw new GitHubAppError('incomplete', 409);
+    }
+    // Errors/quota on any required page abort the whole operation. No partial
+    // inventory can be mistaken for denial or an empty successful history.
+    return wanted.map(scope => ({ ...scope, repository: grants.get(`${scope.installationId}:${scope.repositoryId}`) ?? null }));
+  }
+
+  async function checkRepositoryAccess(options = {}) {
+    const [access] = await checkRepositoriesAccess([options]);
+    if (!access.repository) throw new GitHubAppError('forbidden', 403);
+    return { repository: access.repository };
+  }
+
   async function allowedRepository(installationId, repositoryId, refresh = false) {
     installationId = id(installationId); repositoryId = id(repositoryId);
     const cacheKey = `${installationId}:${repositoryId}`;
@@ -247,7 +305,7 @@ export function createGitHubAppClient({ accessToken, expectedGitHubId, appId, fe
   }
 
   return {
-    getIdentity, listInstallations, listRepositories, resolveCommit,
+    getIdentity, listInstallations, listRepositories, resolveCommit, checkRepositoriesAccess, checkRepositoryAccess,
     async authorizeRepository(options = {}) {
       await allowedRepository(options.installationId, options.repositoryId, true);
       return resolveCommit(options);

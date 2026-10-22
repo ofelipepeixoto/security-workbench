@@ -12,7 +12,7 @@ import ts from 'typescript';
 const webRoot = fileURLToPath(new URL('../', import.meta.url));
 const output = await mkdtemp(join(webRoot, '.ui-render-'));
 const files = ['app/workbench.tsx', 'app/access-panel.tsx', 'components/operational-info.tsx', 'components/demo-workbench.ts'];
-let Workbench, WorkbenchListState, RunMetadata, RunEvidenceDetails;
+let Workbench, WorkbenchListState, RunMetadata, RunEvidenceDetails, RunOutcome, RunCoverage;
 try {
   for (const file of files) {
     const source = await readFile(join(webRoot, file), 'utf8');
@@ -32,7 +32,7 @@ try {
   await mkdir(join(output, 'lib'), { recursive: true });
   await copyFile(join(webRoot, 'lib/rea-import-attempt.mjs'), join(output, 'lib/rea-import-attempt.mjs'));
   const components = await import(pathToFileURL(join(output, 'app/workbench.mjs')).href);
-  Workbench = components.default; WorkbenchListState = components.WorkbenchListState; RunMetadata = components.RunMetadata; RunEvidenceDetails = components.RunEvidenceDetails;
+  Workbench = components.default; WorkbenchListState = components.WorkbenchListState; RunMetadata = components.RunMetadata; RunEvidenceDetails = components.RunEvidenceDetails; RunOutcome = components.RunOutcome; RunCoverage = components.RunCoverage;
 } finally {
   await rm(output, { recursive: true, force: true });
 }
@@ -138,4 +138,97 @@ test('REA statistics and commit remain declared rather than presented as acquire
   assert.match(details, /JSON de até 1 MiB/);
   assert.doesNotMatch(details, /Até 20 arquivos/);
   assert.match(details, /não comprovam leitura/);
+});
+
+function importedRun(overrides = {}) {
+  return { id: 'synthetic-import', source: 'rea-import', repo: 'fixture/example', project_id: 'synthetic-project', status: 'complete', revision: 'a'.repeat(40), created_at: '2026-10-22T00:00:00Z', files_read: 1, bytes_read: 342, partial: true, findings: [], digest: 'b'.repeat(64), ...overrides };
+}
+const component = (Component, props) => renderToStaticMarkup(React.createElement(Component, props));
+
+test('REA coverage separates received, imported and omitted counts with fixed reasons', () => {
+  const run = importedRun({ provenance: { observations_seen: 7, observations_imported: 2, observations_omitted: 5, observations_omitted_by_reason: { unsupported_node_kind: 2, unsupported_location_kind: 3 }, native_findings_declared: 9 } });
+  const html = component(RunCoverage, { run });
+  assert.match(html, /<dt>Recebidas no artefato<\/dt><dd>7<\/dd>/);
+  assert.match(html, /<dt>Importadas para revisão<\/dt><dd>2<\/dd>/);
+  assert.match(html, /<dt>Não importadas<\/dt><dd>5<\/dd>/);
+  assert.match(html, /Tipo de estrutura ainda não importado<\/span><b>2<\/b>/);
+  assert.match(html, /Formato de localização ainda não importado<\/span><b>3<\/b>/);
+  assert.match(html, /Recebidas não significa vulnerabilidades/);
+  assert.doesNotMatch(html, /Limite de candidatos atingido/);
+  const technical = component(RunEvidenceDetails, { run });
+  assert.match(technical, /Achados declarados pelo REA<\/dt><dd>9/);
+  assert.match(technical, /não equivale aos candidatos importados/);
+});
+
+test('legacy imports retain known counts without inventing imported totals or omission reasons', () => {
+  const run = importedRun({ provenance: { observations_seen: 4, observations_omitted: 4 } });
+  const html = component(RunCoverage, { run });
+  assert.match(html, /Recebidas no artefato<\/dt><dd>4/);
+  assert.match(html, /Não importadas<\/dt><dd>4/);
+  assert.match(html, /Importadas para revisão<\/dt><dd><span class="not-recorded">Não registrado/);
+  assert.match(html, /Motivos não registrados nesta importação/);
+  assert.match(html, /não foram estimadas/);
+  assert.doesNotMatch(html, /Tipo de estrutura ainda não importado|Observação repetida/);
+  const outcome = component(RunOutcome, { run, demo: false });
+  assert.match(outcome, /Nenhum candidato foi importado/);
+  assert.match(outcome, /href="#analysis-coverage"/);
+  assert.match(outcome, /ausência de candidatos não comprova segurança/);
+});
+
+test('the result prioritizes the first pending review and reflects existing human decisions', () => {
+  const findings = ['false_positive', 'candidate', 'accepted_risk'].map((status, index) => ({ fingerprint: 'synthetic-' + index, status }));
+  const run = importedRun({ findings });
+  const html = component(RunOutcome, { run, demo: false, onExport: () => {}, compareHref: '/compare?before=one&after=two' });
+  assert.match(html, /1 candidato aguarda sua revisão/);
+  assert.match(html, /class="button primary" href="#synthetic-1"/);
+  assert.match(html, /Revisar próximo candidato/);
+  assert.match(html, /REA não foi executado na hospedagem/);
+  const metadata = component(RunMetadata, { run, demo: false });
+  assert.match(metadata, /1 a revisar · 2 revisados/);
+  const reviewed = component(RunOutcome, { run: { ...run, findings: findings.map(finding => ({ ...finding, status: 'false_positive' })) }, demo: false, onExport: () => {} });
+  assert.match(reviewed, /Revisões registradas para os candidatos/);
+  assert.match(reviewed, /class="button primary"[^>]*>.*Baixar Markdown/);
+  assert.doesNotMatch(reviewed, /Revisar próximo candidato/);
+});
+
+test('technical details are collapsed by default while preserving complete identity', () => {
+  const run = importedRun({ provenance: { observations_seen: 0, observations_imported: 0, observations_omitted: 0, observations_omitted_by_reason: {} } });
+  const html = component(RunEvidenceDetails, { run });
+  assert.match(html, /<details><summary>Identidade e detalhes técnicos/);
+  assert.doesNotMatch(html, /<details[^>]* open/);
+  assert.match(html, new RegExp(run.revision));
+  assert.match(html, new RegExp(run.digest));
+  assert.match(component(RunCoverage, { run }), /Nenhuma omissão registrada nesta importação/);
+});
+
+test('review controls identify the candidate and local navigation leads to real sections', () => {
+  const html = render('detail', { initialRunId: 'example-run' });
+  for (const section of ['result', 'review', 'coverage', 'technical']) {
+    assert.match(html, new RegExp('href="#analysis-' + section + '"'));
+    assert.match(html, new RegExp('id="analysis-' + section + '"'));
+  }
+  for (const fingerprint of ['example-secret', 'example-workflow']) {
+    assert.match(html, new RegExp('<label for="finding-decision-' + fingerprint + '"'));
+    assert.match(html, new RegExp('<select id="finding-decision-' + fingerprint + '" aria-describedby="finding-help-' + fingerprint + '"'));
+    assert.match(html, new RegExp('id="finding-help-' + fingerprint + '"'));
+  }
+});
+
+test('unfinished analyses offer recovery without review or a completed result', () => {
+  const run = importedRun({ status: 'running', findings: [], files_read: null });
+  const html = component(RunOutcome, { run, demo: false, refreshHref: '/runs/synthetic-import', onExport: () => {} });
+  assert.match(html, /A análise está em andamento/);
+  assert.match(html, /Atualizar estado/);
+  assert.doesNotMatch(html, /Revisar próximo candidato|Baixar Markdown|Nenhum candidato foi importado/);
+  const metadata = component(RunMetadata, { run, demo: false });
+  assert.match(metadata, /Ainda não disponível/);
+  assert.doesNotMatch(metadata, /Nenhum candidato/);
+});
+
+test('missing findings are unavailable data rather than an empty successful result', () => {
+  const run = importedRun({ findings: undefined });
+  const html = component(RunOutcome, { run, demo: false, refreshHref: '/runs/synthetic-import' });
+  assert.match(html, /Os candidatos não estão disponíveis neste registro/);
+  assert.match(html, /Recarregar análise/);
+  assert.doesNotMatch(html, /Nenhum candidato foi importado|ausência de candidatos/);
 });

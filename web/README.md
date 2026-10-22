@@ -1,5 +1,17 @@
 # Security Workbench — demonstração pública e área de operação protegida
 
+## Estado revisável do MVP v2
+
+A implementação controlada acrescenta catálogo GitHub App, identidades por ID
+numérico, autorização por objeto e jobs duráveis. **As flags nascem desligadas;
+isso não está publicado nem homologado com duas contas reais.** O histórico abaixo
+descreve entregas anteriores e não substitui a
+[matriz atual de implementação e aceite](../docs/mvp-v2-entrega.md).
+Consulte a [decisão D1](../docs/adr-mvp-v2.md), o
+[roteiro da App](../docs/github-app-piloto.md) e o
+[manifesto dos motores](../docs/mvp-v2-cobertura.md). Nenhuma migração de produção,
+App, credencial persistente ou consumidor hospedado foi ativado nesta entrega.
+
 Adaptador web do núcleo Python/SQLite do Workbench, na linha do PR #6. O runtime de Sites usa JavaScript/Workers; o núcleo original e os bancos locais permanecem preservados.
 
 ## Jornada

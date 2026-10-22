@@ -343,3 +343,27 @@ Chave AES QA criada sem revelar valor. Flags off, cron ausente, zero consumidor
 Queue, zero job/sessão/ativação da janela. Fluxos reais A/B, revogação, jobs,
 scheduler, revisão/comparação/exportação continuam bloqueados tecnicamente,
 nunca marcados como aprovados por mocks. Produção pública permanece v15.
+
+### Adendo — fixtures e autenticação hospedada, 22/10/2026 BRT
+
+As duas fixtures privadas nominalmente autorizadas foram criadas sob
+ofelipepeixoto e radartech-news, sem workflows e só com dados sintéticos.
+Commits: `5cd1c984ab235042da96a736d8a1f80e790cf4bc` (A) e
+`e2d0537fd0525b30c54267cc98d470d6c59c5f28` (B). O registro de execução detalha
+o desvio de privacidade de B, corrigido enquanto ainda vazia e antes de arquivos.
+Nenhum conteúdo real ou segredo foi exposto; não omitir esse incidente.
+
+Client secrets cadastrados nos destinos QA protegidos, sem leitura dos valores.
+Dois logins OAuth reais aprovados, com dashboards próprios vazios. App B
+instalada com seleção exclusiva da fixture B; conexão persistida e catálogo real
+de um repositório aprovado. Não é prova de isolamento por IDs nem paginação de
+90–100 projetos. Instalação A não confirmada devido a timeout da integração de
+navegador, sem evidência para atribuir causa ao GitHub. A autorização já existe.
+
+Login/multiusuário/App ligados só no web QA; jobs desligados nos dois Workers,
+zero cron, zero consumidores e janela sem ativação. A v15 foi preservada.
+Código hospedado continua `e361bc8b2a10cba5e2755320f4fa28bbdaadcaa0`.
+Head anterior ao adendo `76f5e7031e94abbbe14f1874bd3dbb483b75074a`:
+[CI 39721269070](https://github.com/ofelipepeixoto/security-workbench/actions/runs/39721269070)
+**4/4 aprovados**. Nenhum teste de implementação foi refeito neste adendo
+documental. [Evidências, limites e bloqueios](qa-execucao-2026-10-22.md).

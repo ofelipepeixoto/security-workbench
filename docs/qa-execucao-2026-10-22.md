@@ -184,3 +184,76 @@ novos claims/envios. Não manter cron recorrente sem mecanismo/responsável de
 remoção. Expiry runtime bloqueia processamento, mas não remove o cron do
 provedor. Guardar evidências; limpeza permanente e purge exigem autorização
 própria. Nenhum processamento recorrente está ativo agora.
+
+## Adendo — fixtures autorizadas e dois logins reais, 22/10/2026 BRT
+
+O proprietário autorizou nominalmente duas fixtures privadas, somente com dados
+sintéticos. Foram criadas sem workflows, dependências executáveis, credenciais
+reais ou código do produto/terceiros:
+
+| Fixture | Identificador | Commit de dados sintéticos |
+| --- | --- | --- |
+| `ofelipepeixoto/security-workbench-qa-fixture` | `1429246928` | `5cd1c984ab235042da96a736d8a1f80e790cf4bc` |
+| `radartech-news/security-workbench-qa-fixture` | `1429249854` | `e2d0537fd0525b30c54267cc98d470d6c59c5f28` |
+
+A primeira contém README e um arquivo JS inerte; a segunda, um arquivo JS
+inerte. Os marcadores inválidos foram criados para testar candidatos/falso
+positivo; não são tokens de provedor e nenhum arquivo foi executado. O
+Workbench continua em `ofelipepeixoto/security-workbench`, sem transferência.
+
+**Incidente de criação corrigido:** a seleção de privacidade da segunda fixture
+não se confirmou antes do envio do formulário. Ela foi criada pública e vazia.
+Ao detectar o estado pela API e pelo painel, a execução foi interrompida nesse
+repositório e a visibilidade alterada para privada antes de adicionar qualquer
+arquivo ou commit. O painel confirmou o estado privado; não houve publicação
+de segredo, código real ou arquivo sintético nesse intervalo. Esse desvio foi
+informado ao proprietário e não deve ser apresentado como criação privada
+desde o primeiro instante.
+
+O cadastro dos client secrets foi confirmado por nome/tipo nos Workers QA, sem
+ler valores. A presença em ambos não é comparação dos valores criptografados.
+Login e multiusuário foram habilitados exclusivamente no Worker web QA, com
+allowlist dos dois IDs previamente aprovados. Os dois fluxos OAuth de login
+reais concluíram: primeiro `ofelipepeixoto`, depois `radartech-news`, cada um
+abrindo o próprio dashboard com zero projetos/execuções. O principal persistido
+para B foi `github:322086368`; não recebeu o papel de proprietário. Os dados
+anteriores de `qa-synthetic:a/b` não apareceram. Isso é evidência real do login
+e do recorte inicial de isolamento; não substitui o teste A/B por IDs de projetos,
+execuções e revisões reais, ainda pendente.
+
+A App foi habilitada no Worker web QA para completar a conexão autorizada.
+Na conta B, instalação `173995260` concluída com `Only select repositories`,
+uma única fixture privada e leitura de código/metadata. O OAuth da App também
+concluiu e a conexão ficou persistida sob B no D1; o catálogo real retornou
+exatamente uma instalação e a fixture B, em uma página. Não confundir isso com
+prova de paginação de 90–100 projetos. Nenhuma outra conta/repositório foi
+selecionado. O fluxo B não exigiu entregar chave privada ao Workbench nem JWT
+de instalação; o aviso inicial de cadastro não deve manter esse handoff como
+pré-requisito presumido. Nenhuma chave privada foi obtida pelas ferramentas.
+
+**Bloqueio atual:** a instalação da conta A não teve confirmação final. A
+navegação da integração de navegador excedeu seu prazo ao retomar o seletor
+GitHub; não há status HTTP que permita atribuir a causa à plataforma GitHub.
+Não alegar instalação A aprovada nem repetir submissões sem reconciliar o
+estado. Retomar em A e selecionar somente sua fixture; a autorização já existe.
+O conector GitHub não oferece criação de repositórios e não passou a acessar
+a fixture privada B; os passos B usaram o painel, sem ampliar esse conector.
+
+Estado confirmado depois dos testes: web QA com login/multiusuário/App ligados
+e jobs desligados; consumer com App/multiusuário/jobs desligados. Ambos sem
+cron; Queue com zero consumidores; zero jobs e zero ativações da janela no D1.
+Os sete dias de análises ainda não começaram. Não reenviar o empacotamento
+inicial sobre esses bindings/segredos. Produção permanece fora dessas mudanças.
+
+Pendências: instalação/conexão A, preflight fresco e compatibilidade/consumo da
+análise Free, isolamento por IDs, revogação/recuperação App, paginação real,
+Queue/scheduler/reentrega/cancelamento/recuperação, revisão/comparação/exportação
+e jornadas completas. A tela de acesso ainda contém texto de proprietário único,
+apesar de a allowlist QA aceitar A/B; ajustar a cópia condicionada ao piloto antes
+do aceite de UX, sem alterar a autorização do servidor ou a v15.
+
+A [CI 39721269070](https://github.com/ofelipepeixoto/security-workbench/actions/runs/39721269070)
+do head `76f5e7031e94abbbe14f1874bd3dbb483b75074a` concluiu com quatro jobs
+aprovados. Este adendo registra operações e evidências; não modifica o código
+dos Workers (`e361bc8b2a10cba5e2755320f4fa28bbdaadcaa0`). Piloto completo ainda
+não homologado e nenhum lançamento público novo.

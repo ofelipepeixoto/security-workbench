@@ -11,8 +11,8 @@ import ts from 'typescript';
 // Effects and browser interactions require the separate runtime/browser checks.
 const webRoot = fileURLToPath(new URL('../', import.meta.url));
 const output = await mkdtemp(join(webRoot, '.ui-render-'));
-const files = ['app/workbench.tsx', 'app/access-panel.tsx', 'components/operational-info.tsx', 'components/demo-workbench.ts'];
-let Workbench, WorkbenchListState, RunMetadata, RunEvidenceDetails, RunOutcome, RunCoverage;
+const files = ['app/workbench.tsx', 'app/access-panel.tsx', 'components/operational-info.tsx', 'components/demo-workbench.ts', 'components/github-catalog.tsx', 'components/github-catalog-controller.tsx'];
+let Workbench, WorkbenchListState, RunMetadata, RunEvidenceDetails, RunOutcome, RunCoverage, RunsTable, GitHubCatalog, CatalogJobStatus, filterCatalogRepositories, catalogFailureScope;
 try {
   for (const file of files) {
     const source = await readFile(join(webRoot, file), 'utf8');
@@ -33,6 +33,10 @@ try {
   await copyFile(join(webRoot, 'lib/rea-import-attempt.mjs'), join(output, 'lib/rea-import-attempt.mjs'));
   const components = await import(pathToFileURL(join(output, 'app/workbench.mjs')).href);
   Workbench = components.default; WorkbenchListState = components.WorkbenchListState; RunMetadata = components.RunMetadata; RunEvidenceDetails = components.RunEvidenceDetails; RunOutcome = components.RunOutcome; RunCoverage = components.RunCoverage;
+  RunsTable = components.RunsTable;
+  const catalog = await import(pathToFileURL(join(output, 'components/github-catalog.mjs')).href);
+  GitHubCatalog = catalog.GitHubCatalog; CatalogJobStatus = catalog.CatalogJobStatus; filterCatalogRepositories = catalog.filterCatalogRepositories;
+  catalogFailureScope = (await import(pathToFileURL(join(output, 'components/github-catalog-controller.mjs')).href)).catalogFailureScope;
 } finally {
   await rm(output, { recursive: true, force: true });
 }
@@ -42,7 +46,7 @@ function render(view, props = {}) {
 }
 
 test('public journeys render their own heading and preserve explicit fictitious navigation', () => {
-  for (const [view, title] of Object.entries({ dashboard: 'Visão geral', projects: 'Projetos', findings: 'Achados', runs: 'Análises', compare: 'Comparar análises', reports: 'Relatórios', profile: 'Perfil', account: 'Conta e acesso', help: 'Ajuda', onboarding: 'Do escopo à revisão' })) {
+  for (const [view, title] of Object.entries({ dashboard: 'Visão geral', projects: 'Projetos', repositories: 'Repositórios GitHub', findings: 'Achados', runs: 'Análises', compare: 'Comparar análises', reports: 'Relatórios', profile: 'Perfil', account: 'Conta e acesso', help: 'Ajuda', onboarding: 'Do escopo à revisão' })) {
     const html = render(view);
     assert.match(html, new RegExp('<h1>' + title + '</h1>'));
     assert.match(html, /Dados fictícios/);
@@ -91,7 +95,7 @@ test('registered projects and GitHub integration have separate, honest states', 
   assert.match(projects, /Adicionar projeto/);
   assert.match(projects, /Importar REA local/);
   const account = render('account');
-  assert.match(account, /Não integrada/);
+  assert.match(account, /Consultar estado no catálogo/);
   assert.match(account, /Não habilitado/);
   assert.doesNotMatch(account, /<button[^>]*>Instalar/);
   const profile = render('profile');
@@ -101,14 +105,14 @@ test('registered projects and GitHub integration have separate, honest states', 
 
 test('owner loading state never falls back to fictional projects or a false zero review count', () => {
   const html = render('dashboard', { signedIn: true, name: 'Operador de teste' });
-  assert.match(html, /Carregando projetos e histórico/);
+  assert.match(html, /Carregando projetos e histórico da sua conta/);
   assert.doesNotMatch(html, /exemplo-autorizado/);
   assert.doesNotMatch(html, /Dados fictícios guardados/);
   assert.match(html, /Carregando decisões registradas/);
 });
 
 test('every operational route has a direct server entry point including the report path', async () => {
-  for (const route of ['dashboard', 'projects', 'findings', 'runs', 'runs/[runId]', 'compare', 'reports', 'profile', 'account', 'help', 'onboarding', 'settings']) {
+  for (const route of ['dashboard', 'projects', 'repositories', 'findings', 'runs', 'runs/[runId]', 'compare', 'reports', 'profile', 'account', 'help', 'onboarding', 'settings']) {
     const source = await readFile(join(webRoot, 'app', route, 'page.tsx'), 'utf8');
     assert.match(source, /WorkbenchPage/);
     assert.match(source, /force-dynamic/);
@@ -255,4 +259,130 @@ test('acquisition timeout and generic failure never become a clean result or an 
   // Legacy/unknown failure codes must not acquire a diagnosis retroactively.
   assert.doesNotMatch(renderFailure('acquisition'), /cota é compartilhada|ultrapassou o tempo limite/);
   assert.doesNotMatch(renderFailure('toString'), /cota é compartilhada|ultrapassou o tempo limite/);
+});
+
+const noCatalogActions = Object.fromEntries(['connect', 'disconnect', 'refresh', 'chooseInstallation', 'moreInstallations', 'moreRepositories', 'filter', 'select', 'revision', 'prepare', 'confirm', 'enqueue', 'clearSelection', 'refreshJob', 'cancelJob'].map(name => [name, () => {}]));
+const catalogLimits = { files: 20, bytes: 2097152, fileBytes: 262144, deadlineMs: 45000 };
+const syntheticRepository = { id: 101, name: 'fixture-private', full_name: 'synthetic-owner/fixture-private', owner: { login: 'synthetic-owner' }, private: true, default_branch: 'main', language: 'JavaScript', archived: false, installation_id: 11, permissions: { pull: true } };
+function catalogModel(changes = {}) {
+  return {
+    demo: false, status: { enabled: true, connection: { state: 'connected' }, jobs_enabled: false, limits: catalogLimits }, statusLoading: false, error: '', busy: false,
+    installations: { items: [{ id: 11, account: { login: 'synthetic-owner', type: 'User' }, suspended_at: null, repository_selection: 'selected' }], state: 'loaded', page: 1, nextPage: null, complete: true, syncedAt: '2026-10-22T12:00:00Z' },
+    repositories: { items: [syntheticRepository], state: 'loaded', page: 1, nextPage: null, complete: true, syncedAt: '2026-10-22T12:00:00Z' },
+    installationId: 11, filters: { q: '', visibility: '', archived: '', language: '' }, selection: null, job: null, pollingPaused: false, ...changes,
+  };
+}
+const renderCatalog = model => component(GitHubCatalog, { model, actions: noCatalogActions });
+
+test('the disabled pilot and public demo never expose a supplied private repository or operational controls', () => {
+  const disabled = catalogModel(); disabled.status.enabled = false;
+  for (const model of [disabled, catalogModel({ demo: true })]) {
+    const html = renderCatalog(model);
+    assert.doesNotMatch(html, /synthetic-owner|fixture-private|Conectar repositórios|Solicitar análise limitada|Desconectar repositórios/);
+    assert.match(html, /ativação controlada|não é simulado na demonstração/);
+  }
+  assert.match(render('repositories'), /O catálogo real não é simulado/);
+});
+
+test('connection states are distinct and none treats OAuth login as repository authorization', () => {
+  const expected = { not_connected: 'Conecte o acesso aos repositórios', expired: 'A conexão com os repositórios expirou', revoked: 'O acesso aos repositórios foi revogado', not_configured: 'GitHub App ainda não configurada' };
+  for (const [state, title] of Object.entries(expected)) {
+    const model = catalogModel(); model.status.connection.state = state;
+    const html = renderCatalog(model);
+    assert.match(html, new RegExp(title));
+    assert.doesNotMatch(html, /fixture-private|Escolher repositório/);
+    if (state === 'not_configured') assert.doesNotMatch(html, /Conectar repositórios/);
+  }
+  const suspended = catalogModel(); suspended.installations.items[0].suspended_at = '2026-10-22T12:00:00Z';
+  assert.match(renderCatalog(suspended), /instalação está suspensa/);
+  assert.doesNotMatch(renderCatalog(suspended), /Escolher repositório/);
+});
+
+test('catalog loading and failures never turn into a successful empty list', () => {
+  for (const state of ['loading', 'error']) {
+    const model = catalogModel(); model.repositories = { ...model.repositories, items: [], state };
+    const html = renderCatalog(model);
+    assert.match(html, /Carregando repositórios|consulta dos repositórios falhou/);
+    assert.doesNotMatch(html, /Nenhum repositório autorizado retornado|Nenhum repositório nesta página/);
+  }
+  const empty = catalogModel(); empty.installations.items = []; empty.installationId = null;
+  const html = renderCatalog(empty);
+  assert.match(html, /Nenhuma instalação acessível foi retornada/);
+  assert.match(html, /possíveis aprovações/);
+  assert.doesNotMatch(html, /Conexão aguardando aprovação/);
+});
+
+test('catalog filters apply to loaded pages and pagination never claims a complete global search', () => {
+  const model = catalogModel(); model.repositories.nextPage = 2; model.repositories.complete = false;
+  model.repositories.items.push({ ...syntheticRepository, id: 102, full_name: 'synthetic-org/archived-public', private: false, archived: true, language: 'Python' });
+  const filtered = filterCatalogRepositories(model.repositories.items, { q: 'synthetic-org', visibility: 'public', archived: 'yes', language: 'Python' });
+  assert.deepEqual(filtered.map(repository => repository.id), [102]);
+  const html = renderCatalog(model);
+  assert.match(html, /Sincronização incompleta/);
+  assert.match(html, /somente as páginas já carregadas/);
+  assert.match(html, /Carregar próxima página/);
+  assert.match(html, /Proprietário: synthetic-owner · ID 101 · branch padrão: main/);
+  assert.match(html, /Privado · JavaScript/);
+});
+
+test('the selected repository and fixed commit need explicit confirmation with server limits', () => {
+  const model = catalogModel();
+  model.selection = { repository: syntheticRepository, revisionInput: '', confirmed: false, prepared: { project: { id: 'synthetic-project' }, repository: syntheticRepository, revision: 'c'.repeat(40), limits: catalogLimits } };
+  const html = renderCatalog(model);
+  assert.match(html, /Selecionar ou listar não inicia uma análise/);
+  assert.match(html, new RegExp('<code>' + 'c'.repeat(40) + '</code>'));
+  assert.match(html, /Até 20 arquivos, 2097152 bytes no total, 262144 bytes por arquivo e 45 segundos/);
+  assert.match(html, /processamento por jobs está desativado/);
+  assert.match(html, /<button class="button primary" disabled="">Solicitar análise limitada/);
+  assert.doesNotMatch(html, /Análise iniciada|Análise concluída/);
+});
+
+test('job states offer bounded status recovery and only a completed job links to a result', () => {
+  const job = { id: 'synthetic-job', run_id: 'synthetic-run', status: 'queued' };
+  const queued = component(CatalogJobStatus, { job, busy: false, paused: true, actions: noCatalogActions });
+  assert.match(queued, /Na fila/);
+  assert.match(queued, /atualização automática desta tela foi pausada/);
+  assert.match(queued, /Cancelar solicitação/);
+  assert.doesNotMatch(queued, /Entender resultado|[0-9]+%/);
+  const cancelled = component(CatalogJobStatus, { job: { ...job, status: 'cancel_requested' }, busy: false, paused: false, actions: noCatalogActions });
+  assert.match(cancelled, /ainda não significa que o processamento parou/);
+  assert.doesNotMatch(cancelled, /Cancelar solicitação/);
+  const completed = component(CatalogJobStatus, { job: { ...job, status: 'complete' }, busy: false, paused: false, actions: noCatalogActions });
+  assert.match(completed, /href="\/runs\/synthetic-run"/);
+  assert.match(completed, /Entender resultado/);
+});
+
+test('GitHub App results do not acquire a public label or unproven commit verification', () => {
+  const run = importedRun({ source: 'github-app', verified_revision: true });
+  const html = component(RunMetadata, { run, demo: false });
+  assert.match(html, /GitHub App/);
+  assert.match(html, /Vínculo verificado na aquisição/);
+  assert.doesNotMatch(html, /GitHub público|Commit declarado/);
+  const pending = component(RunMetadata, { run: { ...run, verified_revision: false }, demo: false });
+  assert.doesNotMatch(pending, /Vínculo verificado na aquisição/);
+});
+
+test('access-restricted history preserves accessible rows without claiming a successful empty history', () => {
+  const empty = component(RunsTable, { items: [], restricted: true, href: path => path });
+  assert.match(empty, /Histórico com acesso restrito/);
+  assert.match(empty, /não comprova ausência de análises ou achados/);
+  assert.doesNotMatch(empty, /Nenhuma análise nesta seleção/);
+  const visible = component(RunsTable, { items: [importedRun({ repo: 'synthetic-owner/visible-history', source: 'github-app' })], restricted: true, href: path => path });
+  assert.match(visible, /visible-history/);
+  assert.match(visible, /GitHub App/);
+});
+
+test('permission management links never forward a destination outside GitHub', () => {
+  const unsafe = catalogModel(); unsafe.status.connect_url = 'https://attacker.invalid/collect';
+  const html = renderCatalog(unsafe);
+  assert.doesNotMatch(html, /attacker\.invalid|Gerenciar permissões no GitHub/);
+  const safe = catalogModel(); safe.status.connect_url = 'https://github.com/settings/installations';
+  assert.match(renderCatalog(safe), /href="https:\/\/github.com\/settings\/installations"/);
+});
+
+test('repository credential failures do not invalidate the independent login session', () => {
+  for (const code of ['disconnected', 'not_connected', 'expired', 'revoked']) assert.equal(catalogFailureScope(401, code), 'app_connection');
+  assert.equal(catalogFailureScope(401), 'login_session');
+  assert.equal(catalogFailureScope(403, 'forbidden'), 'object_access');
+  assert.equal(catalogFailureScope(503, 'rate_limited'), 'other');
 });

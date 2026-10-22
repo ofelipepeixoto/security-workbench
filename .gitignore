@@ -8,6 +8,7 @@ __pycache__/
 .venv/
 *.db
 *.sqlite*
+.qa-local/
 reports/
 !web/app/reports/
 !web/app/reports/page.tsx

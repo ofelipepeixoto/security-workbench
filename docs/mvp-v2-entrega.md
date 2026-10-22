@@ -263,3 +263,47 @@ Os testes não usaram rede GitHub ou contas reais. A CI do novo head deve ser
 consultada separadamente no PR; os quatro resultados da tabela são dos heads
 anteriores exatos, não da correção. Nenhuma alteração de schema/lockfile/workflow
 foi necessária neste ajuste.
+
+
+## Adendo — controles para QA isolado, 22/10/2026 BRT
+
+Base remota reconfirmada: PR [#41](https://github.com/ofelipepeixoto/security-workbench/pull/41),
+head `ced53ffe3326bf2afb3f9abf94b86b6ef5f46527`, aberto em rascunho;
+[CI 39713248169](https://github.com/ofelipepeixoto/security-workbench/actions/runs/39713248169)
+concluída com sucesso. Nenhuma alteração da correção de listagem foi refeita.
+A v15 do Sites foi reconfirmada; nenhuma publicação/deploy/migração de produção.
+
+Novo ajuste revisável: janela imutável de sete dias, quota transacional conjunta
+50 jobs/24 h (350 totais), fixtures por identidade/instalação/repositório, limites
+por aquisição e reenvio, parada automática do processamento e roteiro de
+encerramento sem exclusão. Migration 0006 adiciona ledger vazio, sem ativar QA.
+Cron começa ausente. A trava de aplicação não substitui retirar o cron real no
+encerramento. Ferramenta offline de preflight/ativação/fechamento não chama APIs.
+
+Validação local: **223 testes Node aprovados**, lint, TypeScript e build;
+Miniflare D1 aplicou 0000–0006, confirmou preservação do legado, recusa de owner
+inconsistente, rollback, FKs e QA ainda inativo. Treze casos iniciais dos controles
+mais defesa D1 de fechamento (14 testes dedicados) cobrem quota A/B, concorrência
+pelo último slot, idempotência, rollback, limites de transporte, janela/redeploy,
+parada durante aquisição e acesso cruzado. Transporte e identidades desses casos
+são sintéticos. Testes Python inalterados não foram repetidos localmente.
+A CI do novo head deve ser identificada no PR correspondente; a CI acima é da
+base #41. Não confundir build local com integração hospedada.
+
+Preflight Cloudflare real: conta existente controlada pelo proprietário foi
+identificada pelo conector direto e apresentada privadamente para confirmação;
+associação Super Administrador aceita. Inventário completo: 0 Workers, 0 D1 e
+0 Queues atuais. Nome/identificadores da conta e dados pessoais não constam da
+publicação. Não deduzir consumo histórico zero desse inventário. Assinaturas e
+consumo de cobrança permanecem bloqueados: endpoint exige Billing Read e não é
+coberto pelo OAuth disponível. Conferência manual do plano/franquias pelo painel
+é o próximo passo. Nenhuma Global API Key foi obtida/inserida. Formulário Composio
+que a exigia foi descartado em favor do conector direto. Nenhuma conta nova.
+
+A [proposta QA atualizada](qa-isolado-mvp-v2.md) registra nomes exatos dos dois
+Workers, D1 operacional + D1 de restauração e Queue, custo adicional obrigatório
+zero, seleção de fixtures, permissões GitHub mínimas e retenção/closeout. GitHub
+App, credenciais, recursos QA, migrations remotas, duas sessões reais, restore,
+Queue/scheduler, revogação, desktop/mobile/teclado e exportação realmente aberta
+continuam **bloqueados na homologação hospedada**. Nenhuma contratação, chamada
+paga, REA reinstalado/reexecutado, Supabase acrescentado ou lançamento público.

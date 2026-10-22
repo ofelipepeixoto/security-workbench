@@ -14,12 +14,12 @@ este ensaio. O REA instalado no WSL permanece preservado; PC não será executor
 
 | Recurso proposto | Quantidade/escopo | Separação e gate antes de criar |
 | --- | --- | --- |
-| Conta/projeto Cloudflare de QA | Uma conta já pertencente ao proprietário, com plano e permissões verificados; preferir conta separada se disponível | Registrar account ID real e mapa produção/QA, sem expor identificadores sensíveis em relatório público; não presumir que o conector Sites concede acesso a essa conta |
+| Conta/projeto Cloudflare de QA | Uma conta já pertencente ao proprietário, com plano e permissões verificados; não criar outra conta | Registrar account ID real e mapa produção/QA, sem expor identificadores sensíveis em relatório público; não presumir que o conector Sites concede acesso a essa conta |
 | Worker web/API | Um, nome candidato `security-workbench-qa` | Origem HTTPS exclusiva; build do head revisado. Nunca salvar/deployar versão no projeto Sites da v15 para fazer QA |
 | Consumidor Queue + scheduler | Um Worker separado, nome candidato `security-workbench-analysis-qa` | Mesmo D1/segredos QA do web, produtor/consumidor exclusivamente QA; `fetch` do consumidor permanece 404; cron de recuperação somente na janela de ensaio |
 | D1 operacional QA | Um, nome candidato `security-workbench-qa` | Banco novo com fixtures sintéticas, sem cópia de produção; bindings diferentes dos da v15 |
 | D1 de restauração QA | Um, descartável, nome candidato `security-workbench-qa-restore` | Restaurar export sintético e conferir antes da App real. Não sobrescrever a produção nem substituir o banco ativo sem reconciliação |
-| Queue QA | Uma, nome candidato `security-workbench-analysis-qa` | Somente `{jobId}` no payload; `max_batch_size=2`, `max_concurrency=2`, `max_retries=2`, conforme exemplo do repositório |
+| Queue QA | Uma, nome candidato `security-workbench-analysis-qa` | Somente `{jobId}` no payload; `max_batch_size=1`, `max_concurrency=2`, `max_retries=2`, conforme exemplo do repositório |
 | Origem web/callback | Uma HTTPS, candidata `qa-security-workbench.camaleaoweb3.com.br` ou `workers.dev` exclusivo | Nome não reservado nem DNS criado. Validar compatibilidade do build/hostname e escolher antes de cadastrar callbacks; não usar domínio principal da v15 |
 | Acesso externo | Apenas participantes A/B e operador, bloqueio de demais identidades no servidor; proteção de borda existente se disponível | Confirmar barreira privada compatível com OAuth e com o plano. Não contratar Access ou criar mecanismo paralelo sem necessidade; a allowlist da aplicação continua obrigatória |
 | OAuth de login + GitHub App de repositórios | Clientes exclusivos de QA, separados do login/App da produção | Cadastro e callbacks exatos somente após aprovação; a integração GitHub deste chat não será transferida para o Site |
@@ -35,8 +35,8 @@ recursos configurados. Não acrescentar serviço público de REA nem porta na VP
 
 | Papel | Conta proposta | Autorização que falta | Escopo mínimo |
 | --- | --- | --- | --- |
-| A — administrador do piloto | `ofelipepeixoto` | Confirmar participação e repositórios benignos escolhidos | ID numérico confirmado no GitHub; workspace administrativo QA distinto do legado de produção |
-| B — segundo workspace | `radartech-news` | Confirmar controle/consentimento e participação como segunda identidade | ID numérico distinto confirmado, allowlist QA; não administrador. Duas identidades operadas pela mesma pessoa testam isolamento, não representam validação independente por outro operador |
+| A — administrador do piloto | `ofelipepeixoto` | Participação autorizada; faltam os repositórios benignos escolhidos | ID numérico confirmado no GitHub; workspace administrativo QA distinto do legado de produção |
+| B — segundo workspace | `radartech-news` | Participação autorizada como segunda identidade; falta login real QA | ID numérico distinto confirmado, allowlist QA; não administrador. Duas identidades operadas pela mesma pessoa testam isolamento, não representam validação independente por outro operador |
 | Organização opcional | Organização de teste controlada e aprovada | Identificar organização/admin e autorizar instalação selecionada | Necessária para afirmar organização/SSO homologados; sem essa prova, item fica pendente |
 | Operador/revisor | Proprietário ou pessoa por ele indicada | Nomear responsável por decisões e guarda das evidências | Sem permissões para alterar a produção pelo roteiro QA |
 
@@ -85,7 +85,7 @@ trocar identidade/IP/token para contornar quota nem fazer upgrade automático.
 As franquias são compartilhadas com outros recursos da conta. Limites Free de
 subrequests/queries e CPU são gates de compatibilidade; tempo de rede não é CPU.
 Alarmes não constituem teto financeiro no Paid. Manter janela curta, allowlist,
-concorrência e limite manual de jobs; se não houver bloqueio efetivo de volume,
+concorrência e ledger durável de quota; se não houver bloqueio efetivo de volume,
 não prometer um teto de gastos automático. Chamada paga de IA: orçamento R$0,
 desligada. Nenhum preço de Sites adicional foi presumido.
 
@@ -202,3 +202,98 @@ Se a integração Cloudflare de administração não estiver disponível, o oper
 executa o menor passo de cadastro/configuração pelo painel. A falta de acesso
 não autoriza usar credenciais do chat, outro projeto Sites ou produção como
 atalho. Ao terminar cada fase, parar no gate seguinte sem ampliar o mandato.
+
+
+## Adendo de execução — preflight e controles de 22/10/2026 BRT
+
+Este adendo prevalece sobre a proposta anterior: custo adicional **zero**,
+nenhuma assinatura/upgrade, nenhuma chamada paga, somente conta Cloudflare
+existente controlada pelo proprietário. Plano Paid com franquia remanescente
+não garante esse teto; não provisionar nesse caso sem solução demonstrada de
+bloqueio de cobrança. Não criar outra conta.
+
+**Preflight real somente leitura:** conector Cloudflare direto autenticado,
+conta existente identificada e apresentada privadamente ao proprietário para
+confirmação; associação aceita de Super Administrador. Inventário completo
+retornou zero Workers, zero D1 e zero Queues atuais. Isso não prova consumo
+histórico zero. Nome/e-mail/Account ID não são publicados neste documento.
+`default_usage_model=standard` não identifica Free versus Paid. A API de
+assinaturas recusou leitura (403): este endpoint não é coberto por OAuth e
+exige Billing Read. Portanto plano, consumo compartilhado e saldo das franquias
+continuam **bloqueados**, não presumidos. Conferir pelo painel antes de criar
+qualquer recurso. Não conceder chave global ao Composio: o formulário encontrado
+exigia Global API Key; o conector direto tornou esse caminho desnecessário.
+A v15 do Sites foi reconfirmada, sem alteração. A conta Cloudflare identificada
+é um destino distinto do ambiente gerenciado pelo Sites, não uma transferência
+ou uma conta nova. Propriedade principal permanece ofelipepeixoto.
+
+**Código preparado, sem ativação:** migration `0006_qa_window.sql` cria tabelas
+vazias. A ativação exige INSERT explícito depois das aprovações. A janela é
+imutável: sete períodos consecutivos de 24 horas a partir da ativação efetiva,
+50 jobs novos por período somando A+B, máximo 350 em toda a janela. Não são dias
+calendários BRT nem dias de franquia Cloudflare (UTC). Ledger compartilhado e
+trigger D1 fazem a reserva atômica com job/run; idempotência não consome duas
+vezes, concorrentes disputam o último slot, rollback não deixa reserva órfã.
+Cancelar/excluir não devolve quota; reativar/limpar ledger pela aplicação é
+proibido. Encerramento antecipado é irreversível. A allowlist fixa contém só os
+IDs de ofelipepeixoto e radartech-news; fixtures exigem seleção prévia de
+usuário + instalação + repository ID + nome completo em ambas as contas próprias.
+Nada seleciona/análise automaticamente o catálogo inteiro. REA, scan legado e
+exclusão permanente ficam bloqueados no QA.
+
+Por job: no máximo duas tentativas, 45 s cada, duas aquisições globais e uma por
+workspace (fence/lease existentes preservados); no máximo 16 requests GitHub e
+2 MiB agregados de respostas por tentativa, incluindo autorização/refresh,
+portanto 32 requests e 4 MiB por job. Scanner mantém até 20 arquivos, 2 MiB de
+entrada, 256 KiB/arquivo, 100 achados, 500 dependências e resultado de até 1 MiB.
+O transporte QA recusa destinos pagos/externos e redirects; não grava corpos ou
+credenciais. Revalida usuário/App/repositório antes e depois da aquisição.
+Limite de aquisição é conservador e pode exigir fixture menor; não ampliar sem
+revisão. Compatibilidade real de CPU/subrequests Free permanece não medida.
+
+Queue: reserva atômica antes de enviar, três envios totais/job, espaçados em pelo
+menos 60 s, inclusive falhas ambíguas. Duas retentativas de transporte por envio,
+batch 1 e concorrência 2. Logo não confundir 50 jobs com 50 operações: um envelope
+pequeno normalmente custa escrita + leitura + exclusão; três envios e nove
+entregas dão teto conservador de 21 operações/job (7.350 na janela inteira de
+350 jobs). Esse teto vale só para o dispatcher/consumidor preparados, sem envios
+manuais adicionais nem outros produtores. Franquia livre e consumo dos demais
+recursos ainda precisam ser conferidos. A outbox pode permanecer pendente quando
+os três envios se esgotarem; registrar como falha operacional, sem reset automático.
+
+**Ferramentas locais:** `node scripts/qa-control.mjs check <manifesto-privado>`
+valida conta confirmada, Free, evidência de consumo recente, margem compartilhada,
+compatibilidade medida, origem/IDs distintos de produção e fixtures. Não consulta
+API e não prova a veracidade de um manifesto preenchido: o operador deve anexar
+as evidências reais ao registro protegido. `activate-sql` gera somente um INSERT
+revisável, com início fresco; nenhum comando executa API, deploy ou migration.
+Manifestos/exports/evidências locais ficam em `.qa-local/`, ignorado pelo Git.
+
+**Encerramento preparado desde o início:** expiry impede novos jobs, claims,
+dispatch e resultado tardio; o scheduler retorna sem enviar após o fim. Triggers
+D1 também bloqueiam claim/resultado se um consumidor omitir acidentalmente o
+flag QA. O exemplo de configuração começa sem cron, jobs/App/multiusuário off,
+QA guard on, observability off. Antes de ativar, nomear operador e agendar a
+remoção do cron no plano de controle até o término. A trava runtime **não remove
+o trigger Cloudflare**: uma invocação vazia ainda pode acontecer enquanto ele
+não for removido. Se essa remoção não puder ser garantida, não ativar cron;
+bloquear apenas o teste de scheduler real. Não colocar token administrativo
+permanente no Worker para ele se autoalterar.
+
+`node scripts/qa-control.mjs close-sql` prepara fechamento durável e cancelamento
+sem DELETE, mantendo leases até expirar e todos os históricos/revisões/ledgers.
+No término: remover cron exclusivamente do consumidor QA, desligar dispatcher e
+jobs, pausar/desanexar consumidor QA, verificar ausência de novos envios/claims,
+guardar métricas/evidências sanitizadas. A execução desses comandos requer os
+IDs QA aprovados. Não purgar Queue, remover D1/Workers ou apagar evidências sem
+aprovação de exclusão própria. Restore permanece somente no segundo D1, sem
+bindings do produto, sem recuperar sessões/envelopes antigos ou reiniciar quota.
+
+**Registro de aceite atual:** controles locais e migrations em SQLite/Miniflare
+são testes sintéticos; todas as linhas da matriz hospedada continuam bloqueadas
+por conta/plano/cotas/seleção de fixtures/recursos/App ainda não confirmados.
+Código revisável não equivale a piloto homologado nem a lançamento público.
+Os próximos pedidos, em ordem, são: confirmar conta existente e conferir plano/
+consumo pelo painel; depois aprovar os cinco recursos exatos e deploy/migrations
+só em QA; separadamente aprovar clientes/callbacks/segredos protegidos GitHub e
+instalações de fixtures selecionadas. Não repetir consentimento A/B já fornecido.

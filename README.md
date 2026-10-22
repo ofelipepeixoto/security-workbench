@@ -4,6 +4,8 @@ Plataforma experimental em construção para inspecionar ativos **autorizados**.
 
 ## Site e demonstração online
 
+Atualização de 21/10: **Site v15 publicado**, importação REA existente conferida e aquisição GitHub hospedada bloqueada pela cota pública do servidor. O REA local não precisa ser reinstalado ou repetido. Consulte a [homologação atual](docs/homologacao-2026-10-21.md) e as [pendências](docs/pendencias-2026-10-21.md); os registros de versões anteriores abaixo permanecem históricos.
+
 [Abra a demonstração pública](https://security-workbench.camaleaoweb3.com.br/) sem login. Ela usa **apenas dados fictícios no navegador**: explore projetos, análise, revisão, relatório e comparação sem gravar no servidor ou analisar um repositório real.
 
 O **Site v13**, publicado em 21/10/2026 às 21:09 UTC, exige exclusivamente GitHub na operação real. O segredo e a associação ao proprietário estão configurados no servidor, com login habilitado na revisão de ambiente 6. O proprietário confirmou entrada e histórico na v12; revisão persistida, comparação e download autenticados ainda precisam completar a homologação. A v13 exige novo login por atualizar a associação das sessões. Consulte o [estado e as pendências observadas](docs/pendencias-2026-10-21.md) e o [guia de acesso](docs/autenticacao-github.md).

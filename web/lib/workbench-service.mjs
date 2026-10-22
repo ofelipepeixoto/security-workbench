@@ -80,7 +80,7 @@ function validateMetadata(metadata, repo, expectedId) {
   return metadata;
 }
 
-export function createWorkbenchService({ db, ownerId, user = { userId: ownerId }, githubApp, jobsEnabled = false, dispatchJob, scanner = defaultScanner, now = () => new Date(), uuid = () => crypto.randomUUID() }) {
+export function createWorkbenchService({ db, ownerId, user = { userId: ownerId }, githubApp, jobsEnabled = false, dispatchJob, qaGuard, scanner = defaultScanner, now = () => new Date(), uuid = () => crypto.randomUUID() }) {
   if (typeof ownerId !== 'string' || !ownerId) throw new WorkbenchError('Entre para acessar o Workbench.', 401);
   if (!db?.prepare) throw new WorkbenchError('O armazenamento está indisponível. Tente novamente mais tarde.', 503);
   const stamp = () => now().toISOString();
@@ -199,6 +199,9 @@ export function createWorkbenchService({ db, ownerId, user = { userId: ownerId }
       }) };
     },
     async act(payload) {
+      // The QA window exercises only selected App fixtures. Legacy acquisition,
+      // REA import and permanent evidence deletion cannot bypass its ledger.
+      if (qaGuard && ['inspect','authorize','scan','import-rea','delete-project'].includes(payload.action)) throw new AnalysisJobError('qa_scope',403);
       switch (payload.action) {
         case 'catalog-status': {
           return {catalog: {enabled: appEnabled, connection: appEnabled ? await githubApp.getConnection(user) : {state: 'unavailable'}, jobs_enabled: appEnabled && jobsEnabled === true && typeof dispatchJob === 'function', limits: defaultScanner.SCANNER_LIMITS}};
@@ -206,8 +209,10 @@ export function createWorkbenchService({ db, ownerId, user = { userId: ownerId }
         case 'catalog-installations': return (await appClient()).listInstallations({page: payload.page ?? 1});
         case 'catalog-repositories': return (await appClient()).listRepositories({installationId: payload.installationId, page: payload.page ?? 1});
         case 'catalog-authorize': {
+          if (qaGuard) await qaGuard.check({ownerId,githubId:user.githubId,repositoryId:payload.repositoryId,installationId:payload.installationId});
           const access = await (await appClient()).authorizeRepository({installationId: payload.installationId, repositoryId: payload.repositoryId, revision: payload.revision, branch: payload.branch});
           const metadata = access.repository;
+          if (qaGuard) await qaGuard.check({ownerId,githubId:user.githubId,repositoryId:metadata.id,installationId:payload.installationId,repo:metadata.full_name});
           const existing = await first('SELECT * FROM workbench_projects WHERE owner_id = ? AND repository_id = ?', ownerId, metadata.id);
           if (existing && existing.source !== 'github-app') throw new WorkbenchError('Este repositório já tem um projeto no piloto público. Preserve o histórico e revise a transição antes de conectá-lo pela App.', 409);
           const id = existing?.id ?? uuid();
@@ -221,14 +226,18 @@ export function createWorkbenchService({ db, ownerId, user = { userId: ownerId }
           if (payload.confirmed !== true || typeof payload.revision !== 'string' || !SHA.test(payload.revision)) throw new WorkbenchError('Confirme a análise de um commit válido.');
           const scope = await project(payload.projectId);
           if (scope.source !== 'github-app') throw new WorkbenchError('Selecione um repositório conectado pela GitHub App.', 409);
+          if (qaGuard) await qaGuard.check({ownerId,githubId:user.githubId,repositoryId:scope.repository_id,installationId:scope.installation_id,repo:scope.repo});
           // The catalog is not a lasting authorization. Verify the pinned commit
           // again before persisting any work; the consumer repeats this check.
           const access = await (await appClient()).authorizeRepository({installationId: scope.installation_id, repositoryId: scope.repository_id, revision: payload.revision.toLowerCase()});
           if (access.repository.id !== scope.repository_id || access.repository.full_name !== scope.repo || access.revision !== payload.revision.toLowerCase()) throw new WorkbenchError('O acesso ao commit não foi confirmado. Selecione o repositório novamente.', 409);
-          const jobs = createAnalysisJobs({db, ownerId, githubId: user.githubId, now, uuid});
+          const jobs = createAnalysisJobs({db, ownerId, githubId: user.githubId, now, uuid, qaGuard});
           const queued = await jobs.enqueue({project: scope, revision: payload.revision, requestId: payload.requestId, confirmed: payload.confirmed});
           if (queued.job.status === 'queued') {
-            try { await dispatchJob({jobId: queued.job.id}); }
+            try {
+              if (qaGuard) {if (!await qaGuard.dispatch(queued.job.id,dispatchJob)) return {...queued,dispatch_pending:true};}
+              else await dispatchJob({jobId: queued.job.id});
+            }
             catch { return {...queued, dispatch_pending: true}; }
           }
           return queued;
@@ -443,7 +452,7 @@ export function createWorkbenchService({ db, ownerId, user = { userId: ownerId }
   };
 }
 
-export async function handleWorkbenchRequest(request, { getUser, getDb, authorizedOwnerId, accessPolicy, githubApp, jobsEnabled = false, dispatchJob, scanner = defaultScanner, now = () => new Date(), uuid = () => crypto.randomUUID() }, { reaImportOnly = false } = {}) {
+export async function handleWorkbenchRequest(request, { getUser, getDb, authorizedOwnerId, accessPolicy, githubApp, jobsEnabled = false, dispatchJob, qaGuard, scanner = defaultScanner, now = () => new Date(), uuid = () => crypto.randomUUID() }, { reaImportOnly = false } = {}) {
   try {
     const user = await getUser();
     if (!user?.userId) throw new WorkbenchError('Entre para acessar o Workbench.', 401);
@@ -460,7 +469,7 @@ export async function handleWorkbenchRequest(request, { getUser, getDb, authoriz
       if (payload.action !== undefined && payload.action !== 'import-rea') throw new WorkbenchError('Ação não permitida nesta rota.');
       payload.action = 'import-rea';
     }
-    const service = createWorkbenchService({ db: await getDb(), ownerId: user.userId, user, githubApp, jobsEnabled, dispatchJob, scanner, now, uuid });
+    const service = createWorkbenchService({ db: await getDb(), ownerId: user.userId, user, githubApp, jobsEnabled, dispatchJob, qaGuard, scanner, now, uuid });
     return response(request.method === 'GET' ? await service.list() : await service.act(payload));
   } catch (error) {
     if (error instanceof GitHubAppError) return response({error: error.message, code: error.code, ...(error.retryAt ? {retry_at: error.retryAt} : {})}, error.status);

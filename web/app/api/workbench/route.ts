@@ -2,10 +2,12 @@ import { env } from "cloudflare:workers";
 import { getWorkbenchAccess, githubConfig } from "../../workbench-identity";
 import { githubAppAuth } from "../../github-app";
 import { handleWorkbenchRequest } from "../../../lib/workbench-service.mjs";
+import { createQaGuard } from "../../../lib/qa-guard.mjs";
 
 const dependencies = {
   get authorizedOwnerId() { return env.WORKBENCH_OWNER_ID; },
   getDb: () => env.DB,
+  get qaGuard() { return createQaGuard({env}); },
   get accessPolicy() { return githubConfig(); },
   get githubApp() { return githubAppAuth(); },
   get jobsEnabled() { return env.WORKBENCH_JOBS_ENABLED === "true" && Boolean(env.ANALYSIS_QUEUE); },

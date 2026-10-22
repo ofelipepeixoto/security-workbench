@@ -14,6 +14,10 @@ const MESSAGES = Object.freeze({
   worker_unavailable: 'O consumidor de análises não está configurado neste ambiente.',
   access_revoked: 'O acesso ao repositório não foi confirmado.', invalid_result: 'O motor não produziu um resultado válido.',
   cancelled: 'O job foi cancelado.',
+  qa_closed: 'A janela de QA não está ativa. Novas análises e reenvios estão bloqueados.',
+  qa_scope: 'Esta conta ou fixture não está no escopo selecionado do QA.',
+  qa_quota: 'O limite conjunto de 50 jobs neste dia de QA foi atingido.',
+  qa_consumption: 'O limite de aquisição desta tentativa de QA foi atingido.',
   acquisition_timeout: 'A análise ultrapassou o prazo permitido.', acquisition_failed: 'A aquisição não foi concluída.',
   github_rate_limited: 'A cota GitHub foi atingida. Aguarde o horário de nova tentativa.',
 });
@@ -53,7 +57,7 @@ function projection(result, job) {
 }
 
 export function createAnalysisJobs({ db, ownerId, githubId, now = () => new Date(), uuid = () => crypto.randomUUID(),
-  authorize, analyze, random = Math.random, leaseMs = ANALYSIS_JOB_LIMITS.leaseMs, timeoutMs = ANALYSIS_JOB_LIMITS.timeoutMs } = {}) {
+  authorize, analyze, qaGuard, random = Math.random, leaseMs = ANALYSIS_JOB_LIMITS.leaseMs, timeoutMs = ANALYSIS_JOB_LIMITS.timeoutMs } = {}) {
   if (!db?.prepare || !db?.batch) throw new AnalysisJobError();
   if (typeof ownerId !== 'string' || !ownerId || ownerId.length > 200) throw invalid();
   if (!Number.isInteger(leaseMs) || leaseMs < 1000 || leaseMs > 90000 || !Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 45000 || leaseMs <= timeoutMs) throw invalid();
@@ -79,8 +83,10 @@ export function createAnalysisJobs({ db, ownerId, githubId, now = () => new Date
     const previous = await first('SELECT * FROM workbench_analysis_jobs WHERE owner_id = ? AND request_id = ?', ownerId, request);
     if (previous) return sameRequest(previous, scope, commit);
     const created = new Date(current()).toISOString(), jobId = id(uuid()), runId = id(uuid());
+    const reservation = qaGuard ? await qaGuard.reservation({jobId,ownerId,githubId,project:scope,revision:commit}) : null;
     try {
       await batch([
+        ...(reservation ? [reservation] : []),
         stmt("INSERT INTO workbench_runs (id,owner_id,project_id,repo,repository_id,request_id,requested_revision,revision,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,'running',?,?)", runId, ownerId, scope.id, scope.repo, scope.repository_id, request, commit, commit, created, created),
         stmt("INSERT INTO workbench_analysis_jobs (id,owner_id,github_id,project_id,run_id,repository_id,installation_id,repo,revision,request_id,engine_version,config_key,status,available_at,attempts,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'queued',?,0,?,?)", jobId, ownerId, String(githubId), scope.id, runId, scope.repository_id, scope.installation_id, scope.repo, commit, request, ANALYSIS_ENGINE_VERSION, CONFIG_KEY, created, created, created),
       ]);
@@ -88,6 +94,7 @@ export function createAnalysisJobs({ db, ownerId, githubId, now = () => new Date
       const repeated = await first('SELECT * FROM workbench_analysis_jobs WHERE owner_id = ? AND request_id = ?', ownerId, request);
       if (repeated) return sameRequest(repeated, scope, commit);
       if (await first("SELECT id FROM workbench_analysis_jobs WHERE owner_id = ? AND status IN ('queued','running')", ownerId)) throw new AnalysisJobError('busy', 409);
+      if (qaGuard) await qaGuard.capacity({ownerId,githubId,repositoryId:scope.repository_id,installationId:scope.installation_id,repo:scope.repo});
       throw error;
     }
     return get(jobId);
@@ -104,9 +111,13 @@ export function createAnalysisJobs({ db, ownerId, githubId, now = () => new Date
   }
   async function finish(job, status, failureCode, json = null, retryAt = null) {
     const updated = new Date(current()).toISOString();
-    const fence = "EXISTS (SELECT 1 FROM workbench_analysis_jobs j WHERE j.owner_id=? AND j.id=? AND j.status='running' AND j.lease_token=? AND j.lease_expires_at>?)";
+    const at = current();
+    // Keep the final QA window check inside the same D1 transaction as both
+    // result writes, closing the race with an operator's early shutdown.
+    const qaFence = qaGuard && status === 'complete' ? ` AND EXISTS (SELECT 1 FROM workbench_qa_window WHERE id=1 AND closed_at IS NULL AND starts_at<=${at} AND ends_at>${at})` : '';
+    const fence = "EXISTS (SELECT 1 FROM workbench_analysis_jobs j WHERE j.owner_id=? AND j.id=? AND j.status='running' AND j.lease_token=? AND j.lease_expires_at>?)" + qaFence;
     const statements = retryAt ? [] : [stmt(`UPDATE workbench_runs SET status=?,failure_code=?,result_json=?,updated_at=? WHERE owner_id=? AND id=? AND status='running' AND ${fence}`, status === 'complete' ? 'complete' : 'failed', failureCode, json, updated, ownerId, job.run_id, ownerId, job.id, job.lease_token, updated)];
-    statements.push(stmt("UPDATE workbench_analysis_jobs SET status=?,failure_code=?,available_at=COALESCE(?,available_at),retry_at=?,lease_token=NULL,lease_expires_at=NULL,updated_at=? WHERE owner_id=? AND id=? AND status='running' AND lease_token=? AND lease_expires_at>?", status, failureCode, retryAt, retryAt, updated, ownerId, job.id, job.lease_token, updated));
+    statements.push(stmt("UPDATE workbench_analysis_jobs SET status=?,failure_code=?,available_at=COALESCE(?,available_at),retry_at=?,lease_token=NULL,lease_expires_at=NULL,updated_at=? WHERE owner_id=? AND id=? AND status='running' AND lease_token=? AND lease_expires_at>?" + qaFence, status, failureCode, retryAt, retryAt, updated, ownerId, job.id, job.lease_token, updated));
     await batch(statements);
     return get(job.id);
   }
@@ -115,6 +126,7 @@ export function createAnalysisJobs({ db, ownerId, githubId, now = () => new Date
     const previous = await row(jobId);
     if (!['queued', 'running'].includes(previous.status)) return get(previous.id);
     if (previous.github_id !== String(githubId)) throw new AnalysisJobError('not_found', 404);
+    if (qaGuard) await qaGuard.checkJob(previous);
     const startedMs = current(), started = new Date(startedMs).toISOString();
     if (previous.status === 'running' && previous.lease_expires_at <= started && previous.attempts >= 2) {
       await batch([
@@ -135,6 +147,7 @@ export function createAnalysisJobs({ db, ownerId, githubId, now = () => new Date
     const verify = async () => {
       const live = () => { if (controller.signal.aborted) throw new AnalysisJobError('acquisition_timeout', 504); };
       live();
+      if (qaGuard) await qaGuard.checkJob(job);
       const scope = await first('SELECT * FROM workbench_projects WHERE owner_id=? AND id=?', ownerId, job.project_id);
       live();
       if (!scope || scope.revoked_at || scope.repo !== job.repo || scope.repository_id !== job.repository_id || scope.installation_id !== job.installation_id) throw new AnalysisJobError('access_revoked', 403);

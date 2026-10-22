@@ -135,3 +135,26 @@ export const analysisJobs = sqliteTable("workbench_analysis_jobs", {
   check("workbench_job_status", sql`${table.status} IN ('queued','running','complete','failed','cancelled')`),
   check("workbench_job_attempts", sql`${table.attempts} >= 0 AND ${table.attempts} <= 2`),
 ]);
+
+// QA-only ledgers. Migration 0006 supplies immutable-window/retention/admission
+// triggers and checks; no activation row, FK cascade or runtime provisioning.
+export const qaWindow = sqliteTable("workbench_qa_window", {
+  id: integer("id").primaryKey(),
+  startsAt: integer("starts_at").notNull(),
+  endsAt: integer("ends_at").notNull(),
+  fixturesJson: text("fixtures_json").notNull(),
+  closedAt: integer("closed_at"),
+});
+export const qaReservations = sqliteTable("workbench_qa_reservations", {
+  jobId: text("job_id").primaryKey(),
+  ownerId: text("owner_id").notNull(),
+  githubId: text("github_id").notNull(),
+  repositoryId: integer("repository_id").notNull(),
+  installationId: integer("installation_id").notNull(),
+  repo: text("repo").notNull(),
+  revision: text("revision").notNull(),
+  day: integer("day").notNull(),
+  createdAt: integer("created_at").notNull(),
+  dispatches: integer("dispatches").notNull().default(0),
+  nextDispatchAt: integer("next_dispatch_at").notNull().default(0),
+}, table => [index("workbench_qa_day").on(table.day)]);

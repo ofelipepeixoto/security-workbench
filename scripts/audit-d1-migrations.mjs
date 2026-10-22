@@ -9,7 +9,7 @@ const summary = {local_d1: false, external_network_allowed: false, production_ac
 let runtime, hostDispatcher, restoreDispatcher;
 const directory = new URL('../web/drizzle/', import.meta.url);
 const files = ['0000_careful_shriek.sql', '0001_strong_swarm.sql', '0002_workspace_relations.sql',
-  '0003_github_app_connections.sql', '0004_jobs.sql', '0005_project_catalog.sql'];
+  '0003_github_app_connections.sql', '0004_jobs.sql', '0005_project_catalog.sql', '0006_qa_window.sql'];
 const original = {
   workbench_projects: 'id,owner_id,repo,repository_id,authorized_at',
   workbench_runs: '*', workbench_reviews: '*', workbench_github_sessions: '*', workbench_oauth_flows: '*',
@@ -88,7 +88,8 @@ try {
   summary.batch_rollback = (await db.prepare("SELECT count(*) AS n FROM workbench_projects WHERE id='rollback-project'").first()).n === 0;
   summary.foreign_key_check_clean = (await db.prepare('PRAGMA foreign_key_check').all()).results.length === 0;
   summary.user_table_count = (await db.prepare("SELECT count(*) AS n FROM sqlite_schema WHERE type='table' AND name LIKE 'workbench_%'").first()).n;
-  summary.all_migrations_applied = summary.user_table_count === 8;
+  summary.all_migrations_applied = summary.user_table_count === 10;
+  summary.qa_not_activated = (await db.prepare('SELECT count(*) AS n FROM workbench_qa_window').first()).n === 0;
   const flags = Object.entries(summary).filter(([key, value]) => typeof value === 'boolean' && !['external_network_allowed', 'production_accessed'].includes(key));
   summary.passed = flags.every(([, value]) => value === true);
 } catch {

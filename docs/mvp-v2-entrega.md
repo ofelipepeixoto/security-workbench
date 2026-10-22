@@ -263,3 +263,107 @@ Os testes não usaram rede GitHub ou contas reais. A CI do novo head deve ser
 consultada separadamente no PR; os quatro resultados da tabela são dos heads
 anteriores exatos, não da correção. Nenhuma alteração de schema/lockfile/workflow
 foi necessária neste ajuste.
+
+
+## Adendo — controles para QA isolado, 22/10/2026 BRT
+
+Base remota reconfirmada: PR [#41](https://github.com/ofelipepeixoto/security-workbench/pull/41),
+head `ced53ffe3326bf2afb3f9abf94b86b6ef5f46527`, aberto em rascunho;
+[CI 39713248169](https://github.com/ofelipepeixoto/security-workbench/actions/runs/39713248169)
+concluída com sucesso. Nenhuma alteração da correção de listagem foi refeita.
+A v15 do Sites foi reconfirmada; nenhuma publicação/deploy/migração de produção.
+
+Novo ajuste revisável: janela imutável de sete dias, quota transacional conjunta
+50 jobs/24 h (350 totais), fixtures por identidade/instalação/repositório, limites
+por aquisição e reenvio, parada automática do processamento e roteiro de
+encerramento sem exclusão. Migration 0006 adiciona ledger vazio, sem ativar QA.
+Cron começa ausente. A trava de aplicação não substitui retirar o cron real no
+encerramento. Ferramenta offline de preflight/ativação/fechamento não chama APIs.
+
+Validação local: **223 testes Node aprovados**, lint, TypeScript e build;
+Miniflare D1 aplicou 0000–0006, confirmou preservação do legado, recusa de owner
+inconsistente, rollback, FKs e QA ainda inativo. Treze casos iniciais dos controles
+mais defesa D1 de fechamento (14 testes dedicados) cobrem quota A/B, concorrência
+pelo último slot, idempotência, rollback, limites de transporte, janela/redeploy,
+parada durante aquisição e acesso cruzado. Transporte e identidades desses casos
+são sintéticos. Testes Python inalterados não foram repetidos localmente.
+A CI do novo head deve ser identificada no PR correspondente; a CI acima é da
+base #41. Não confundir build local com integração hospedada.
+
+Preflight Cloudflare real: conta existente controlada pelo proprietário foi
+identificada pelo conector direto e apresentada privadamente para confirmação;
+associação Super Administrador aceita. Inventário completo: 0 Workers, 0 D1 e
+0 Queues atuais. Nome/identificadores da conta e dados pessoais não constam da
+publicação. Não deduzir consumo histórico zero desse inventário. Assinaturas e
+consumo de cobrança permanecem bloqueados: endpoint exige Billing Read e não é
+coberto pelo OAuth disponível. Conferência manual do plano/franquias pelo painel
+é o próximo passo. Nenhuma Global API Key foi obtida/inserida. Formulário Composio
+que a exigia foi descartado em favor do conector direto. Nenhuma conta nova.
+
+A [proposta QA atualizada](qa-isolado-mvp-v2.md) registra nomes exatos dos dois
+Workers, D1 operacional + D1 de restauração e Queue, custo adicional obrigatório
+zero, seleção de fixtures, permissões GitHub mínimas e retenção/closeout. GitHub
+App, credenciais, recursos QA, migrations remotas, duas sessões reais, restore,
+Queue/scheduler, revogação, desktop/mobile/teclado e exportação realmente aberta
+continuam **bloqueados na homologação hospedada**. Nenhuma contratação, chamada
+paga, REA reinstalado/reexecutado, Supabase acrescentado ou lançamento público.
+
+## Adendo — execução QA e diagnóstico do PR #42, 22/10/2026 UTC
+
+PR [#42](https://github.com/ofelipepeixoto/security-workbench/pull/42) permanece
+em rascunho, dependente da branch da correção #41. Sem merge. O
+[registro verificável](qa-execucao-2026-10-22.md) e o adendo da proposta QA
+descrevem recursos reais, migrations/backup/restauração e bloqueios restantes.
+
+| Head remoto | CI concluída |
+| --- | --- |
+| #41 `ced53ffe3326bf2afb3f9abf94b86b6ef5f46527` | [39713248169](https://github.com/ofelipepeixoto/security-workbench/actions/runs/39713248169): sucesso |
+| #42 diagnóstico `d82775ea1fadc76f143f741db769e37d147cff75` | [39718036878](https://github.com/ofelipepeixoto/security-workbench/actions/runs/39718036878): 4/4 aprovados |
+| #42 empacotamento `f04544dc893aa05f6a5233c8c608934baf89e5ec` | [39718517124](https://github.com/ofelipepeixoto/security-workbench/actions/runs/39718517124): 4/4 aprovados |
+| #42 correção mobile/código hospedado `e361bc8b2a10cba5e2755320f4fa28bbdaadcaa0` | [39719974739](https://github.com/ofelipepeixoto/security-workbench/actions/runs/39719974739): 3 aprovados; smoke público falhou com HTTP 403/remaining=0 comprovado |
+
+A causa da primeira falha (39715990883) permanece inconclusiva por falta de
+telemetria no log antigo. Não atribuir automaticamente o rate limit novo ao
+evento antigo. Diagnóstico novo sanitizado mantém assertivas, revisão fixa,
+prazo e exit code de falha, sem skip/token/retry ou timeout ampliado. Nenhum
+conteúdo adquirido, bundle, credencial ou log bruto foi anexado publicamente.
+
+Conta existente e Free confirmados; cinco recursos QA criados. D1 operacional
+recebeu migrations 0000–0006 com preflight/checagem por batch; backup SQL lógico
+de 12 registros sintéticos/39 objetos restaurado e comparado no segundo D1,
+sem vínculo desse banco aos Workers. HTTP e interface inerte reais conferidos;
+correção de overflow mobile preserva acessibilidade. Local: 230 testes Node,
+lint/TypeScript/build aprovados antes da pequena extensão do gate offline;
+após a extensão, a suíte completa passou com **231/231** testes, sem skips.
+
+GitHub reautenticado pelo proprietário; App/OAuth QA registrados sob
+ofelipepeixoto, sem instalações. Ativação A/B/App/processamento já autorizada,
+mas ainda impedida pelos client secrets protegidos e fixtures não selecionadas.
+Chave AES QA criada sem revelar valor. Flags off, cron ausente, zero consumidor
+Queue, zero job/sessão/ativação da janela. Fluxos reais A/B, revogação, jobs,
+scheduler, revisão/comparação/exportação continuam bloqueados tecnicamente,
+nunca marcados como aprovados por mocks. Produção pública permanece v15.
+
+### Adendo — fixtures e autenticação hospedada, 22/10/2026 BRT
+
+As duas fixtures privadas nominalmente autorizadas foram criadas sob
+ofelipepeixoto e radartech-news, sem workflows e só com dados sintéticos.
+Commits: `5cd1c984ab235042da96a736d8a1f80e790cf4bc` (A) e
+`e2d0537fd0525b30c54267cc98d470d6c59c5f28` (B). O registro de execução detalha
+o desvio de privacidade de B, corrigido enquanto ainda vazia e antes de arquivos.
+Nenhum conteúdo real ou segredo foi exposto; não omitir esse incidente.
+
+Client secrets cadastrados nos destinos QA protegidos, sem leitura dos valores.
+Dois logins OAuth reais aprovados, com dashboards próprios vazios. App B
+instalada com seleção exclusiva da fixture B; conexão persistida e catálogo real
+de um repositório aprovado. Não é prova de isolamento por IDs nem paginação de
+90–100 projetos. Instalação A não confirmada devido a timeout da integração de
+navegador, sem evidência para atribuir causa ao GitHub. A autorização já existe.
+
+Login/multiusuário/App ligados só no web QA; jobs desligados nos dois Workers,
+zero cron, zero consumidores e janela sem ativação. A v15 foi preservada.
+Código hospedado continua `e361bc8b2a10cba5e2755320f4fa28bbdaadcaa0`.
+Head anterior ao adendo `76f5e7031e94abbbe14f1874bd3dbb483b75074a`:
+[CI 39721269070](https://github.com/ofelipepeixoto/security-workbench/actions/runs/39721269070)
+**4/4 aprovados**. Nenhum teste de implementação foi refeito neste adendo
+documental. [Evidências, limites e bloqueios](qa-execucao-2026-10-22.md).

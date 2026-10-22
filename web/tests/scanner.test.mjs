@@ -171,6 +171,44 @@ test("streaming JSON size ceiling cancels untrusted response without reading all
   await assert.rejects(repositoryMetadata(REPO, {fetcher: hugeHeader}), /4 MiB/);
 });
 
+test("failed GitHub responses stay bounded when stream cleanup hangs, rejects or throws", {timeout: 3000}, async () => {
+  for (const failure of ["status", "length", "stream"]) {
+    for (const cleanup of ["pending", "rejected", "thrown"]) {
+      let cancellations = 0, releases = 0, reads = 0, requests = 0;
+      const cancel = () => {
+        cancellations++;
+        if (cleanup === "thrown") throw new Error("private cleanup diagnostic");
+        if (cleanup === "rejected") return Promise.reject(new Error("private cleanup diagnostic"));
+        return new Promise(() => {});
+      };
+      const reader = {
+        async read() {reads++; return {done: false, value: new Uint8Array(SCANNER_LIMITS.responseBytes + 1)};},
+        cancel,
+        releaseLock() {releases++;},
+      };
+      const fetcher = async () => {
+        requests++;
+        return {
+          status: failure === "status" ? 503 : 200,
+          headers: new Headers(failure === "length" ? {"content-length": String(SCANNER_LIMITS.responseBytes + 1)} : {}),
+          body: {cancel, getReader: () => reader},
+        };
+      };
+      let deadline;
+      try {
+        await assert.rejects(Promise.race([
+          repositoryMetadata(REPO, {fetcher}),
+          new Promise((_, reject) => {deadline = setTimeout(() => reject(new Error("cleanup exceeded its response bound")), 250);}),
+        ]), failure === "status" ? /HTTP 503/ : /4 MiB/, `${failure}/${cleanup}`);
+      } finally {clearTimeout(deadline);}
+      assert.equal(cancellations, 1);
+      assert.equal(requests, 1);
+      assert.equal(reads, failure === "stream" ? 1 : 0);
+      assert.equal(releases, failure === "stream" ? 1 : 0);
+    }
+  }
+});
+
 test("truncated coverage and aggregate finding/dependency limits stay explicit", async () => {
   const fixture = apiFixture({"main.py": Array.from({length: 110}, () => 'secret="synthetic_12345"').join("\n"), "package.json": JSON.stringify({dependencies: Object.fromEntries(Array.from({length: 510}, (_, i) => [`dep${i}`, "1.0.0"]))})}, (map) => {map.get(`/repos/${REPO}/git/trees/${TREE}?recursive=1`).truncated = true;});
   const result = await inspectGitHub(REPO, ID, REVISION, fixture);

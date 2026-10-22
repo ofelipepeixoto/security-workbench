@@ -49,6 +49,12 @@ function validateMetadata(value, repo) {
   return {repo, repository_id: repositoryId(value.id), default_branch: branch(value.default_branch), private: false};
 }
 
+function cancelStream(stream) {
+  // Cleanup must not extend the request deadline or replace the safe failure.
+  // A transport can reject, throw, or leave its cancellation promise pending.
+  try {stream?.cancel().catch(() => {});} catch { /* best effort */ }
+}
+
 async function withTransport(fetcher, work) {
   const controller = new AbortController();
   const timeoutError = new Error("A leitura ultrapassou 45 segundos. Nenhuma análise foi salva.");
@@ -69,13 +75,13 @@ async function withTransport(fetcher, work) {
     }
     if (response.status !== 200) {
       const rateLimited = (response.status === 403 || response.status === 429) && response.headers?.get('x-ratelimit-remaining') === '0';
-      await response.body?.cancel().catch(() => {});
+      cancelStream(response.body);
       if (rateLimited) throw new GitHubRateLimitError();
       throw new Error(`GitHub retornou HTTP ${Number(response.status) || 0}; confira acesso público e limite da API.`);
     }
     const contentLength = response.headers?.get("content-length");
     if (contentLength && (!/^\d+$/.test(contentLength) || Number(contentLength) > SCANNER_LIMITS.responseBytes)) {
-      await response.body?.cancel().catch(() => {});
+      cancelStream(response.body);
       throw new Error("Resposta do GitHub excede o limite de 4 MiB.");
     }
     if (!response.body?.getReader) throw new Error("Resposta da API sem fluxo de leitura válido.");
@@ -91,7 +97,7 @@ async function withTransport(fetcher, work) {
         chunks.push(value);
       }
     } catch (error) {
-      await reader.cancel().catch(() => {});
+      cancelStream(reader);
       if (controller.signal.aborted) throw timeoutError;
       throw error;
     } finally {reader.releaseLock();}

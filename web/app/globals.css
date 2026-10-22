@@ -16,6 +16,51 @@
 .info-grid{padding:0}.info-grid>.panel{padding:23px;margin:0}.info-grid dl{font-size:13px;line-height:1.7}.info-grid dt{font-weight:650;margin-top:15px}.info-grid dd{margin:4px 0 0;color:var(--muted)}.panel[aria-labelledby=onboarding-heading],.panel[aria-labelledby=help-start-heading]{padding:24px}.panel[aria-labelledby=onboarding-heading]>p,.panel[aria-labelledby=help-start-heading]>p{margin:12px 0 18px}.panel[aria-labelledby=onboarding-heading] .operational-steps{padding-left:23px}.panel[aria-labelledby=onboarding-heading] .button-row,.panel[aria-labelledby=help-start-heading] .button-row{padding:0}
 .list-recovery{padding:24px;display:grid;gap:15px;justify-items:start}.list-recovery p{font-size:13px}
 
+/* Personal GitHub catalog: distinguish discovery, confirmation and durable work. */
+.catalog-message{padding:26px;display:grid;gap:16px;justify-items:start}
+.catalog-message h2{font-size:21px;line-height:1.4}
+.catalog-message p{font-size:14px;max-width:850px}
+.catalog-body{padding:24px}
+.catalog-body>p{font-size:13px;margin:12px 0}
+.catalog-body>h2{font-size:19px;margin-bottom:12px}
+.catalog-body>.button-row{margin:18px 0}
+.catalog-connection .text-button{min-height:44px}
+.catalog-retention{font-size:12px!important;max-width:900px}
+.catalog-browser .section-heading{align-items:flex-start}
+.catalog-browser .section-heading p{font-size:13px}
+.catalog-browser>.catalog-body>.field{max-width:570px;margin-top:0}
+.catalog-filters{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:16px;margin:20px 0}
+.catalog-filters .field{margin:0;font-size:12px;min-width:0}
+.catalog-filters input,.catalog-filters select{min-height:44px;font-size:13px}
+.catalog-scope{line-height:1.8}
+.catalog-repositories{list-style:none;margin:18px 0;padding:0;border-top:1px solid var(--line)}
+.catalog-repositories>li{display:flex;gap:18px;align-items:center;padding:22px 0;border-bottom:1px solid var(--line)}
+.catalog-repositories h3{font-size:16px;line-height:1.5;overflow-wrap:anywhere}
+.catalog-repositories p{font-size:13px;margin-top:6px;overflow-wrap:anywhere}
+.catalog-repositories .catalog-repo-meta{font-size:12px}
+.catalog-repositories .button{max-width:220px;flex-shrink:0}
+.catalog-empty{padding:24px 0;display:grid;gap:12px}
+.catalog-empty h3{font-size:17px;line-height:1.5}
+.catalog-empty p{font-size:13px}
+.catalog-selection .section-heading{align-items:flex-start}
+.catalog-selection h2{font-size:19px;line-height:1.5;overflow-wrap:anywhere}
+.catalog-selection form{max-width:650px}
+.catalog-confirmation{border-top:1px solid var(--line);padding-top:22px;margin-top:24px}
+.catalog-confirmation h3{font-size:17px;margin-bottom:18px}
+.catalog-confirmation dl{display:grid;grid-template-columns:130px minmax(0,1fr);gap:12px 18px;margin:16px 0;line-height:1.7;font-size:13px}
+.catalog-confirmation dt{color:var(--muted);font-weight:600}
+.catalog-confirmation dd{margin:0;overflow-wrap:anywhere}
+.catalog-confirmation code{font-size:13px}
+.catalog-confirmation p{font-size:13px;margin:18px 0}
+.catalog-confirmation .checkbox{margin:20px 0}
+.catalog-job-meta{display:grid;gap:15px;margin:0 0 18px}
+.catalog-job-meta dt{font-size:12px;color:var(--muted);margin-bottom:5px}
+.catalog-job-meta dd{font-size:13px;margin:0;overflow-wrap:anywhere}
+.catalog-job .section-heading{flex-wrap:wrap}
+.catalog-job .section-heading p{font-size:13px}
+@media(max-width:1200px){.catalog-filters{grid-template-columns:repeat(2,minmax(0,1fr))}.catalog-repositories>li{flex-wrap:wrap}.catalog-repositories .grow{flex-basis:calc(100% - 70px)}.catalog-repositories .button{margin-left:66px;max-width:none}}
+@media(max-width:650px){.catalog-message,.catalog-body{padding:20px}.catalog-filters{grid-template-columns:1fr}.catalog-repositories .repo-icon{display:none}.catalog-repositories .grow{flex-basis:100%}.catalog-repositories .button{margin:0;width:100%}.catalog-confirmation dl{grid-template-columns:1fr;gap:5px}.catalog-confirmation dd{margin-bottom:12px}.catalog-confirmation>.button,.catalog-job .button-row>.button{width:100%}.catalog-selection .section-heading{padding:20px}.catalog-connection .button-row{align-items:stretch}.catalog-connection .button-row>.button{width:100%}}
+
 /* Analysis detail: outcome first, technical evidence progressively disclosed. */
 .workspace,.main-content,.page-heading>div,.section-heading>div{min-width:0}
 .button{min-height:44px;white-space:normal;text-align:center}

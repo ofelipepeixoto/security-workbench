@@ -100,20 +100,21 @@ export function createWorkbenchService({ db, ownerId, user = { userId: ownerId }
     client ??= await githubApp.getClient(user);
     return client;
   };
-  const requireAccess = async (scope) => {
+  const requireAccess = async (scope, checked, persist = true) => {
     if (scope.source !== 'github-app') return scope;
     try {
-      const access = await (await appClient()).authorizeRepository({installationId: scope.installation_id, repositoryId: scope.repository_id});
+      const access = checked ?? await (await appClient()).checkRepositoryAccess({installationId: scope.installation_id, repositoryId: scope.repository_id});
+      if (!access.repository) throw new GitHubAppError('forbidden', 403);
       if (access.repository.id !== scope.repository_id) throw new WorkbenchError('Projeto não encontrado.', 404, 'not_found');
       if (scope.revoked_at) {
-        await write('UPDATE workbench_projects SET revoked_at = NULL WHERE owner_id = ? AND id = ?', ownerId, scope.id);
+        if (persist) await write('UPDATE workbench_projects SET revoked_at = NULL WHERE owner_id = ? AND id = ?', ownerId, scope.id);
         return {...scope, revoked_at: null};
       }
       return scope;
     } catch (error) {
       // Denial reveals no repository name, result or cross-user metadata.
       if (error instanceof GitHubAppError && ['disconnected','not_connected','expired','revoked','forbidden','suspended','not_found','insufficient_permission'].includes(error.code)) {
-        await write('UPDATE workbench_projects SET revoked_at = COALESCE(revoked_at, ?) WHERE owner_id = ? AND id = ?', stamp(), ownerId, scope.id);
+        if (persist && !scope.revoked_at) await write('UPDATE workbench_projects SET revoked_at = COALESCE(revoked_at, ?) WHERE owner_id = ? AND id = ?', stamp(), ownerId, scope.id);
         throw new WorkbenchError('Projeto não encontrado ou acesso ao GitHub indisponível.', 404, 'not_found');
       }
       throw error;
@@ -155,11 +156,40 @@ export function createWorkbenchService({ db, ownerId, user = { userId: ownerId }
   return {
     async list() {
       const candidates = await all('SELECT p.*, EXISTS(SELECT 1 FROM workbench_runs r WHERE r.owner_id = p.owner_id AND r.project_id = p.id) AS has_runs FROM workbench_projects p WHERE p.owner_id = ? ORDER BY p.authorized_at DESC LIMIT 100', ownerId);
+      const appScopes = candidates.filter(scope => scope.source === 'github-app');
+      const checked = new Map();
+      if (appScopes.length) {
+        const access = await (await appClient()).checkRepositoriesAccess(appScopes.map(scope => ({installationId: scope.installation_id, repositoryId: scope.repository_id})));
+        if (!Array.isArray(access) || access.length !== appScopes.length) throw new GitHubAppError('unavailable');
+        for (let index = 0; index < appScopes.length; index++) {
+          const scope = appScopes[index], grant = access[index];
+          if (grant?.installationId !== scope.installation_id || grant?.repositoryId !== scope.repository_id) throw new GitHubAppError('unavailable');
+          checked.set(scope.id, grant);
+        }
+      }
       const projects = [];
+      const revoked = [], restored = [];
       let accessRestricted = false;
       for (const candidate of candidates) {
-        try { projects.push(await requireAccess(candidate)); }
-        catch (error) { if (error instanceof WorkbenchError && error.status === 404) accessRestricted = true; else throw error; }
+        try {
+          projects.push(await requireAccess(candidate, checked.get(candidate.id), false));
+          if (candidate.source === 'github-app' && candidate.revoked_at) restored.push(candidate.id);
+        } catch (error) {
+          if (error instanceof WorkbenchError && error.status === 404) {
+            accessRestricted = true;
+            if (!candidate.revoked_at) revoked.push(candidate.id);
+          } else throw error;
+        }
+      }
+      // D1 permits 100 bound parameters per statement. Chunk transitions, not
+      // one write per project; never persist an incomplete provider snapshot.
+      for (let start = 0; start < revoked.length; start += 98) {
+        const ids = revoked.slice(start, start + 98);
+        await write(`UPDATE workbench_projects SET revoked_at = COALESCE(revoked_at, ?) WHERE owner_id = ? AND id IN (${ids.map(() => '?').join(',')})`, stamp(), ownerId, ...ids);
+      }
+      for (let start = 0; start < restored.length; start += 99) {
+        const ids = restored.slice(start, start + 99);
+        await write(`UPDATE workbench_projects SET revoked_at = NULL WHERE owner_id = ? AND id IN (${ids.map(() => '?').join(',')})`, ownerId, ...ids);
       }
       const visible = new Set(projects.map(p => p.id));
       const rows = (await all('SELECT * FROM workbench_runs WHERE owner_id = ? ORDER BY created_at DESC LIMIT 100', ownerId)).filter(r => visible.has(r.project_id));

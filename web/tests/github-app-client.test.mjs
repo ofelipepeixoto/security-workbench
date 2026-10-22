@@ -155,3 +155,51 @@ test('a provider Retry-After beyond24hours is never shortened', async () => {
   await assert.rejects(f.client.listInstallations(), error => error.code === 'rate_limited' && error.retryAt === '2026-10-23T12:00:00.000Z');
   assert.equal(f.calls.length, 1);
 });
+
+test('batch access walks installation and repository pages once without resolving commits',async()=>{
+  const repos=Array.from({length:100},(_,i)=>repository({id:300+i,name:'repo-'+i,full_name:'fixture-owner/repo-'+i}));
+  const f=fixture(url=>{
+    const u=new URL(url),page=Number(u.searchParams.get('page')||1);
+    if(u.pathname==='/user/installations')return json({total_count:101,installations:page===1?[installation({id:9})]:[installation()]});
+    if(u.pathname==='/user/installations/10/repositories')return json({total_count:200,repositories:page===1?Array.from({length:100},(_,i)=>repository({id:500+i})):repos});
+  });
+  const result=await f.client.checkRepositoriesAccess(repos.map(r=>({installationId:10,repositoryId:r.id})));
+  assert.equal(result.length,100);assert.ok(result.every(x=>x.repository?.id===x.repositoryId));assert.equal(f.calls.length,5);
+  assert.ok(f.calls.every(x=>!x.url.includes('/commits/')));
+});
+
+test('access-only refresh never reuses old grants and analysis still resolves its pinned SHA',async()=>{
+  let revoked=false;
+  const f=fixture(url=>new URL(url).pathname==='/user/installations/10/repositories'?json({total_count:1,repositories:[repository({permissions:{pull:!revoked}})]}):null);
+  await f.client.authorizeRepository({installationId:10,repositoryId:300,revision:REVISION});
+  const commits=f.calls.filter(x=>x.url.includes('/commits/')).length;
+  await f.client.checkRepositoryAccess({installationId:10,repositoryId:300});
+  assert.equal(f.calls.filter(x=>x.url.includes('/commits/')).length,commits);
+  revoked=true;
+  await assert.rejects(f.client.checkRepositoryAccess({installationId:10,repositoryId:300}),{code:'forbidden'});
+  await assert.rejects(f.client.authorizeRepository({installationId:10,repositoryId:300,revision:REVISION}),{code:'forbidden'});
+  assert.equal(f.calls.filter(x=>x.url.includes('/commits/')).length,commits);
+  assert.equal((await f.client.checkRepositoriesAccess([{installationId:10,repositoryId:300}]))[0].repository,null);
+});
+
+test('batch missing, suspended and insufficient installations give explicit denied grants without content requests',async()=>{
+  for(const extra of [{id:11},{suspended_at:'2026-10-21T12:00:00Z'},{permissions:{metadata:'read'}}]){
+    const f=fixture(url=>new URL(url).pathname==='/user/installations'?json({total_count:1,installations:[installation(extra)]}):null);
+    const result=await f.client.checkRepositoriesAccess([{installationId:10,repositoryId:300}]);
+    assert.equal(result[0].repository,null);assert.equal(f.calls.length,2);
+  }
+});
+
+test('batch pagination ceiling is an error rather than a denied or incomplete grant set',async()=>{
+  const f=fixture(url=>new URL(url).pathname==='/user/installations/10/repositories'?json({total_count:500,repositories:[repository({id:999})]}):null,{maxPages:1});
+  await assert.rejects(f.client.checkRepositoriesAccess([{installationId:10,repositoryId:300}]),{code:'incomplete'});
+  assert.equal(f.calls.length,3);
+});
+
+test('changing pages with duplicate requested IDs cannot keep an earlier positive grant',async()=>{
+  const f=fixture(url=>{
+    const u=new URL(url),page=Number(u.searchParams.get('page')||1);
+    if(u.pathname==='/user/installations/10/repositories')return json({total_count:200,repositories:[repository({permissions:{pull:page===1}})]});
+  });
+  await assert.rejects(f.client.checkRepositoriesAccess([{installationId:10,repositoryId:300},{installationId:10,repositoryId:301}]),{code:'unavailable'});
+});

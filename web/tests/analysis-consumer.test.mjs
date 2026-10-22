@@ -18,6 +18,10 @@ function provider({rename=false}={}){
   const text='password="synthetic_12345"\n', bytes=Buffer.from(text);
   const blobSha=createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
   const client={
+    async checkRepositoryAccess({repositoryId,installationId}){
+      assert.equal(repositoryId,202);assert.equal(installationId,8);
+      return {repository:{id:202,full_name:rename?'synthetic-org/renamed':'synthetic-org/private-fixture',private:true}};
+    },
     async authorizeRepository({repositoryId,installationId,revision}){
       assert.equal(repositoryId,202);assert.equal(installationId,8);
       return {repository:{id:202,full_name:rename?'synthetic-org/renamed':'synthetic-org/private-fixture',private:true},revision:revision??SHA,tree_sha:TREE};

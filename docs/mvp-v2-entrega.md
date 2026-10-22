@@ -154,3 +154,112 @@ não autorizado/realizado. Nenhum desses pendentes foi transformado em sucesso.
 Próxima ação indispensável: aprovar especificamente o envio das quatro branches
 novas ao repositório público `ofelipepeixoto/security-workbench`, sem merge/deploy.
 Depois, obter CI e revisar a sequência antes do cadastro/ativação do piloto.
+
+## Adendo — publicação e revisão do custo da listagem
+
+Os registros de envio bloqueado/CI pendente acima são históricos. Após autorização
+específica, as quatro branches foram enviadas e os PRs abertos em rascunho. Heads
+remotos reconferidos nesta rodada, sem merge:
+
+| PR / base | Head remoto exato | CI concluída com sucesso nos quatro jobs |
+| --- | --- | --- |
+| [#37](https://github.com/ofelipepeixoto/security-workbench/pull/37) / #36 | `d2ccf298b43c83804103e345eda7006f6e058424` | [39711082809](https://github.com/ofelipepeixoto/security-workbench/actions/runs/39711082809) |
+| [#38](https://github.com/ofelipepeixoto/security-workbench/pull/38) / #37 | `ac97928090009733e1c7e808619632cfb38ff261` | [39711107921](https://github.com/ofelipepeixoto/security-workbench/actions/runs/39711107921) |
+| [#39](https://github.com/ofelipepeixoto/security-workbench/pull/39) / #38 | `672e7fb1644e814d3d0108e53c394ee851046c8c` | [39711140091](https://github.com/ofelipepeixoto/security-workbench/actions/runs/39711140091) |
+| [#40](https://github.com/ofelipepeixoto/security-workbench/pull/40) / #39 | `e2d72f55ecfdc6067051c740e1d245b6bc2de1f6` | [39711190392](https://github.com/ofelipepeixoto/security-workbench/actions/runs/39711190392) |
+
+Jobs: `web-build`, `test`, `github-live`, `web-scanner`. Os hashes locais nas seções
+anteriores identificam as origens testadas; o conector criou metadados/commits
+novos, com árvores Git idênticas. Nenhum bundle ou log bruto foi enviado.
+CI verde não homologa duas contas reais, App, Queue ou download aberto.
+
+### Risco confirmado na base de #40
+
+`list()` verificava até 100 projetos sequencialmente com `authorizeRepository()`:
+repetia instalações, páginas de repositórios e resolução do commit padrão sob
+prazo compartilhado de 45 s. Acesso ao histórico não precisa de commit atual;
+branch ausente ou repositório vazio também não deve impedir a checagem de acesso.
+
+O teste usa o serviço e cliente App reais com transporte sintético, SQLite em
+memória e avanço controlado de `Date`. As métricas são de relógio **simulado**;
+não houve rede GitHub, espera real de 45 s ou medição de latência de produção.
+
+| Cenário | Antes | Depois |
+| --- | --- | --- |
+| 90 projetos, uma instalação/página, 200 ms por resposta | HTTP 504 aos 45.000 ms; 225 consultas; 74 leituras de commit | HTTP 200 aos 600 ms; 3 consultas; zero commits |
+| 100 projetos, mesmo cenário | HTTP 504 aos 45.000 ms; 225 consultas; 74 leituras de commit | HTTP 200 aos 600 ms; 3 consultas; zero commits |
+| 100 projetos, duas instalações, duas páginas de repositórios por instalação, 250 ms por resposta | HTTP 504 no prazo compartilhado | HTTP 200; 6 consultas; 1.500 ms simulados |
+| 100 projetos revogados/restabelecidos | Revisão independente reproduziu 102 consultas D1/100 writes, falhando sob teto sintético de 50 consultas | 4 instruções D1 para revogar ou restabelecer os 100; 2 se já revogados, sem writes; outro proprietário intocado |
+| HTTP 429 na segunda página | Erro explícito | Continua 429 com `retry_at`; sem inventário/histórico parcial ou corpo do provedor |
+| Paginação lenta, 9 s por resposta | Prazo global de 45 s | Continua 504 aos 45 s simulados; timeout não foi aumentado |
+
+### Contrato da correção
+
+`checkRepositoriesAccess()` lê cada página necessária uma vez por instalação,
+para até 100 pares de installation/repository daquela operação. Não mantém cache
+de concessões entre requisições/usuários. Cada nova requisição revalida; consultas
+pontuais usam `checkRepositoryAccess()` fresco. O cliente continua validando user
+access token, ID GitHub, app ID e interseção usuário/instalação/repositório.
+A [documentação oficial GitHub](https://docs.github.com/en/rest/apps/installations)
+foi reconferida para endpoints por usuário e paginação.
+
+O SHA permanece resolvido na preparação explícita (`catalog-authorize`), no
+enqueue e nas revalidações do consumidor/scanner. Detalhes, revisão e exportação
+verificam acesso sem resolver a branch atual. IDs cruzados são recusados pelo
+owner no banco antes de consultar o provedor. Só projetos confirmados e suas runs
+podem aparecer; grants retornados são conferidos contra os pares solicitados.
+
+Ausência confirmada em inventário completo/suspensão/falta de Contents gera
+negativa por recurso com `access_restricted`. Falhas de rede, identidade, quota,
+JSON ou teto de páginas interrompem a operação explicitamente, sem lista vazia
+bem-sucedida. Desconexão global é erro de conexão, não zero projetos. Páginas com
+IDs solicitados duplicados são recusadas. Refresh negativo elimina grants
+anteriores do par; não há fallback para token mais amplo.
+
+Revogações/restabelecimentos no D1 só recebem writes quando mudam. Os IDs são
+divididos em blocos de 98 para revogar (horário + owner + IDs) e 99 para restaurar
+(owner + IDs), respeitando o [teto D1 de 100 parâmetros por query](https://developers.cloudflare.com/d1/platform/limits/).
+A listagem usa duas leituras e até três UPDATEs em transições mistas, nunca um
+UPDATE por projeto. O teste aplica o limite de bindings mesmo no SQLite local.
+Erro de persistência continua explícito; não há exposição de dados no erro.
+
+Casos novos: 90/100 projetos, paginação de instalações/repositórios, latência,
+429 posterior, timeout, identidade errada, suspensão, falta de Contents, teto de
+páginas, IDs duplicados, revogação na mesma instância e entre requisições, SHA na
+análise, IDs cruzados de detalhe/revisão/exportação e transições D1 com B intocado.
+Resultados da validação final constam do PR desta correção, com head/CI próprios.
+
+### QA isolado: proposta, sem execução remota
+
+A [proposta concreta](qa-isolado-mvp-v2.md) lista dois Workers, dois D1 (operação e
+restauração), uma Queue, cron temporário e origem/callbacks/segredos exclusivos.
+A=`ofelipepeixoto` e B=`radartech-news` são contas candidatas a confirmar, não
+homologadas por estarem conectadas nesta conversa. Escopo: fixtures benignas,
+Metadata/Contents read-only e allowlist só em QA. D1 continua fonte única;
+Supabase/n8n/OpenAI/REA nativo não são necessários ao ensaio.
+
+Estimativa incremental US$ 0 somente se plano/cotas existentes e compatibilidade
+Free forem confirmados por medição. Free tem limites de CPU/subrequests que ainda
+podem bloquear a carga máxima; não se promete hospedagem gratuita garantida.
+Nenhuma contratação ou chamada paga. A proposta registra fontes/preços e parada
+antes de qualquer gasto novo.
+
+Ainda não executados na hospedagem: preflight/migração QA, exportação/restauração
+em banco separado, duas identidades reais, organização/SSO quando disponível,
+paginação/revogação App, Queue com reentrega/cancelamento/recuperação, revisão
+persistida, comparação e Markdown realmente salvo, aberto e conferido. Transporte
+injetado em QA deve ser rotulado como simulado, sem alegar prova do GitHub real.
+Não foram repetidos instalação, compilação ou fixture REA. A v15 foi preservada.
+
+Faltam somente as autorizações específicas da proposta para executar QA: ambiente,
+conta/origem/recursos e teto sem gasto novo; participantes/repos/App e inserção
+protegida de segredos; janela limitada de migrations e testes com flags apenas em
+QA. Nenhum desses efeitos foi realizado nesta etapa.
+
+Validação local final do ajuste: **209/209 testes Node**, lint, TypeScript e build
+aprovados. Revisão independente: 39 testes focados passaram, sem bloqueio residual
+no recorte; identificou e permitiu corrigir writes repetidos e excesso de bindings.
+Os testes não usaram rede GitHub ou contas reais. A CI do novo head deve ser
+consultada separadamente no PR; os quatro resultados da tabela são dos heads
+anteriores exatos, não da correção. Nenhuma alteração de schema/lockfile/workflow
+foi necessária neste ajuste.

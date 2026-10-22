@@ -21,6 +21,8 @@ function provider(user, state = {}) {
       return {
         async listInstallations() { return {installations:[{id:repo.installation_id}], page:1, next_page:null, complete:true, total_count:1}; },
         async listRepositories({installationId}) { if (installationId !== repo.installation_id) throw new GitHubAppError('forbidden',403); return {repositories:[repo], page:1, next_page:null, complete:true, total_count:1}; },
+        async checkRepositoryAccess({installationId,repositoryId}) { if (repositoryId !== repo.id || installationId !== repo.installation_id) throw new GitHubAppError('forbidden',403); return {repository:repo}; },
+        async checkRepositoriesAccess(scopes) { return scopes.map(scope=>({...scope,repository:scope.repositoryId===repo.id&&scope.installationId===repo.installation_id?repo:null})); },
         async authorizeRepository({installationId,repositoryId,revision}) { if (repositoryId !== repo.id || installationId !== repo.installation_id) throw new GitHubAppError('forbidden',403); return {repository:repo, revision:revision ?? SHA, tree_sha:'b'.repeat(40)}; },
       };
     },
@@ -98,7 +100,7 @@ test('revoked App access hides its projects/results immediately while quota erro
     const state={},app=provider(B,state),b=await select(db,B,{githubApp:app}),id=seedRun(db,B,b);
     state.revoked=true;
     const list=await api(db,B,null,{githubApp:app});
-    assert.equal(list.status,200); assert.equal(list.body.access_restricted,true); assert.deepEqual(list.body.projects,[]); assert.deepEqual(list.body.runs,[]);
+    assert.equal(list.status,401); assert.equal(list.body.code,'disconnected'); assert.equal(list.body.projects,undefined); assert.equal(list.body.runs,undefined);
     for(const action of ['run','report','review']) assert.equal((await api(db,B,{action,runId:id},{githubApp:app})).status,404);
     assert.ok(db.sql.prepare('SELECT revoked_at FROM workbench_projects WHERE id=?').get(b.id).revoked_at);
     const findings=await api(db,B,{action:'findings'},{githubApp:app});

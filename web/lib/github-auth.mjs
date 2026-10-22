@@ -46,6 +46,38 @@ function trustedOrigin(value) {
     return origin.origin;
   } catch { return null; }
 }
+function githubId(value) {
+  if (typeof value !== 'string' && typeof value !== 'number') return null;
+  const id = String(value);
+  return /^[1-9][0-9]*$/.test(id) && Number.isSafeInteger(Number(id)) ? id : null;
+}
+function workspacePolicy(input) {
+  try {
+    const owner = githubId(input?.githubOwnerId), ownerId = input?.workbenchOwnerId;
+    if (!owner || typeof ownerId !== 'string' || !ownerId || ownerId.trim() !== ownerId || ownerId.length > 200) return null;
+    if (input.multiUserEnabled !== undefined && typeof input.multiUserEnabled !== 'boolean') return null;
+    const allowed = input.allowedGitHubIds ?? [];
+    if (!Array.isArray(allowed) || allowed.length > 100 || allowed.some(id => typeof id !== 'string' || githubId(id) !== id) || new Set(allowed).size !== allowed.length) return null;
+    if (allowed.some(id => id !== owner && `github:${id}` === ownerId)) return null;
+    return { githubOwnerId: owner, workbenchOwnerId: ownerId, multiUserEnabled: input.multiUserEnabled === true, allowedGitHubIds: [...allowed].sort() };
+  } catch { return null; }
+}
+
+/** Server policy only. No email, login, browser owner or first-user election. */
+export function resolveWorkspacePrincipal(config, numericGitHubId) {
+  const policy = workspacePolicy(config), id = githubId(numericGitHubId);
+  if (!policy || !id) return null;
+  if (id === policy.githubOwnerId) return { userId: policy.workbenchOwnerId, githubId: id, role: 'admin' };
+  if (!policy.multiUserEnabled || !policy.allowedGitHubIds.includes(id)) return null;
+  return { userId: `github:${id}`, githubId: id, role: 'member' };
+}
+
+export function isWorkbenchUserAllowed(config, user) {
+  if (!user || user.provider !== 'github' || typeof user.githubId !== 'string') return false;
+  const principal = resolveWorkspacePrincipal(config, user.githubId);
+  return Boolean(principal && user.userId === principal.userId && user.role === principal.role);
+}
+
 function configuration(input) {
   if (input?.enabled !== true) return null;
   try {
@@ -53,12 +85,11 @@ function configuration(input) {
     if (!origin) return null;
     if (typeof input.clientId !== 'string' || !/^[A-Za-z0-9_.-]{1,200}$/.test(input.clientId)) return null;
     if (typeof input.clientSecret !== 'string' || !input.clientSecret || input.clientSecret.length > 4096) return null;
-    const githubOwnerId = String(input.githubOwnerId);
-    if (!/^[1-9][0-9]*$/.test(githubOwnerId) || !Number.isSafeInteger(Number(githubOwnerId))) return null;
-    if (typeof input.workbenchOwnerId !== 'string' || !input.workbenchOwnerId || input.workbenchOwnerId.trim() !== input.workbenchOwnerId || input.workbenchOwnerId.length > 200) return null;
+    const policy = workspacePolicy(input);
+    if (!policy) return null;
     const sessionVersion = input.sessionVersion === undefined ? '1' : input.sessionVersion;
     if (typeof sessionVersion !== 'string' || !/^[1-9][0-9]{0,11}$/.test(sessionVersion)) return null;
-    return { ...input, origin, githubOwnerId, sessionVersion };
+    return { ...input, ...policy, origin, sessionVersion };
   } catch { return null; }
 }
 
@@ -114,7 +145,10 @@ export function createGitHubAuth({ config, db, fetcher = fetch, now = () => new 
   const settings = configuration(config);
   const timestamp = () => Math.floor(new Date(now()).valueOf() / 1000);
   const usable = request => settings && new URL(request.url).origin === settings.origin && db?.prepare;
-  const key = () => digest(JSON.stringify([settings.origin, settings.clientId, settings.githubOwnerId, settings.workbenchOwnerId, settings.sessionVersion]));
+  const key = () => digest(JSON.stringify([
+    settings.origin, settings.clientId, settings.githubOwnerId, settings.workbenchOwnerId, settings.sessionVersion,
+    ...(settings.multiUserEnabled ? ['workbench-pilot-v1', settings.allowedGitHubIds] : []),
+  ]));
   const first = (sql, ...values) => db.prepare(sql).bind(...values).first();
   const write = async (sql, ...values) => {
     const result = await db.prepare(sql).bind(...values).run();
@@ -129,10 +163,11 @@ export function createGitHubAuth({ config, db, fetcher = fetch, now = () => new 
     if (!token) return null;
     try {
       const row = await first('SELECT * FROM workbench_github_sessions WHERE token_hash = ? AND expires_at > ?', await digest(token), timestamp());
-      if (!row || row.config_key !== await key() || row.github_id !== settings.githubOwnerId || row.owner_id !== settings.workbenchOwnerId) return null;
+      const principal = row && resolveWorkspacePrincipal(settings, row.github_id);
+      if (!principal || row.config_key !== await key() || row.owner_id !== principal.userId) return null;
       const csrfToken = await digest(`workbench-csrf\0${token}`);
       if (row.csrf_hash !== await digest(csrfToken)) return null;
-      return { userId: row.owner_id, displayName: row.display_name, provider: 'github', csrfToken };
+      return { ...principal, displayName: row.display_name, provider: 'github', csrfToken };
     } catch { return null; }
   }
 
@@ -190,12 +225,14 @@ export function createGitHubAuth({ config, db, fetcher = fetch, now = () => new 
         const token = await boundedJson(TOKEN_URL, { method: 'POST', headers: { Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ client_id: settings.clientId, client_secret: settings.clientSecret, code, code_verifier: flow.verifier, redirect_uri: `${settings.origin}/api/auth/github/callback` }).toString() }, 16384, transport);
         if (typeof token.access_token !== 'string' || !/^[A-Za-z0-9_-]{1,2048}$/.test(token.access_token) || token.token_type !== 'bearer' || token.scope !== '' || token.error) return invalidCallback('unavailable');
         const user = await boundedJson(USER_URL, { method: 'GET', headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${token.access_token}`, 'X-GitHub-Api-Version': '2026-03-10', 'User-Agent': 'security-workbench-owner-login' } }, 32768, transport);
-        if (!Number.isSafeInteger(user.id) || user.id <= 0 || String(user.id) !== settings.githubOwnerId) return invalidCallback('forbidden');
+        if (!Number.isSafeInteger(user.id) || user.id <= 0) return invalidCallback('forbidden');
+        const principal = resolveWorkspacePrincipal(settings, user.id);
+        if (!principal) return invalidCallback('forbidden');
         if (typeof user.login !== 'string' || !/^[A-Za-z0-9-]{1,39}$/.test(user.login)) return invalidCallback('unavailable');
         const session = randomSecret(), csrfToken = await digest(`workbench-csrf\0${session}`);
         const old = readCookie(request, SESSION_COOKIE);
         if (old) await write('DELETE FROM workbench_github_sessions WHERE token_hash = ?', await digest(old));
-        await write('INSERT INTO workbench_github_sessions (token_hash, csrf_hash, github_id, owner_id, display_name, config_key, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', await digest(session), await digest(csrfToken), settings.githubOwnerId, settings.workbenchOwnerId, user.login, configKey, current + SESSION_SECONDS, current);
+        await write('INSERT INTO workbench_github_sessions (token_hash, csrf_hash, github_id, owner_id, display_name, config_key, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', await digest(session), await digest(csrfToken), principal.githubId, principal.userId, user.login, configKey, current + SESSION_SECONDS, current);
         return redirect('/', 303, [cookie(FLOW_COOKIE, '', 0), cookie(SESSION_COOKIE, session, SESSION_SECONDS)]);
       } catch { return invalidCallback('unavailable'); }
       finally { clearTimeout(timer); }
@@ -219,7 +256,8 @@ export function createGitHubAuth({ config, db, fetcher = fetch, now = () => new 
         const tokenHash = await digest(token);
         const row = await first('SELECT * FROM workbench_github_sessions WHERE token_hash = ?', tokenHash);
         const csrfToken = await digest(`workbench-csrf\0${token}`);
-        const active = row && settings && row.expires_at > timestamp() && row.config_key === await key() && row.github_id === settings.githubOwnerId && row.owner_id === settings.workbenchOwnerId && row.csrf_hash === await digest(csrfToken);
+        const principal = row && settings && resolveWorkspacePrincipal(settings, row.github_id);
+        const active = principal && row.expires_at > timestamp() && row.config_key === await key() && row.owner_id === principal.userId && row.csrf_hash === await digest(csrfToken);
         if (active) {
           const csrf = request.headers.get('X-Workbench-CSRF');
           if (!csrf || !SECRET.test(csrf) || csrf !== csrfToken) return reply({ error: 'Confirme a sessão antes de sair.' }, 403);

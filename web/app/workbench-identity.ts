@@ -12,6 +12,8 @@ export function githubConfig() {
     githubOwnerId: env.GITHUB_OWNER_ID || "",
     workbenchOwnerId: env.WORKBENCH_OWNER_ID || "",
     sessionVersion: env.GITHUB_SESSION_VERSION || "1",
+    multiUserEnabled: env.WORKBENCH_MULTIUSER_ENABLED === "true",
+    allowedGitHubIds: env.WORKBENCH_PILOT_GITHUB_IDS ? env.WORKBENCH_PILOT_GITHUB_IDS.split(",") : [],
   };
 }
 

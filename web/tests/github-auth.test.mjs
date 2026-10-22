@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync, readdirSync } from 'node:fs';
-import { createGitHubAuth, isGitHubLoginConfigured } from '../lib/github-auth.mjs';
+import { createGitHubAuth, isGitHubLoginConfigured, resolveWorkspacePrincipal, isWorkbenchUserAllowed } from '../lib/github-auth.mjs';
 
 const ORIGIN = 'https://workbench.example';
 const FLOW = '__Host-workbench_github_flow';
@@ -122,6 +122,8 @@ test('successful callback verifies stable ID, preserves canonical owner, stores 
   assert.equal(row.token_hash, await hash(token));
   const session = await f.auth.getSession(request('/', signed.sessionCookie));
   assert.equal(session.userId, config.workbenchOwnerId);
+  assert.equal(session.githubId, config.githubOwnerId);
+  assert.equal(session.role, 'admin');
   assert.equal(session.provider, 'github');
   assert.equal(session.displayName, 'fixture-owner');
   assert.equal(row.csrf_hash, await hash(session.csrfToken));
@@ -131,6 +133,118 @@ test('successful callback verifies stable ID, preserves canonical owner, stores 
   assert.equal(stored.includes(config.clientSecret), false);
   assert.equal(f.db.sql.prepare('SELECT count(*) AS n FROM workbench_oauth_flows').get().n, 0);
   f.db.close();
+});
+
+test('workspace policy defaults to the legacy administrator and admits only explicitly enabled stable IDs', () => {
+  const pilot = {...config, multiUserEnabled: true, allowedGitHubIds: ['202', '303']};
+  const admin = {userId: config.workbenchOwnerId, githubId: '101', role: 'admin'};
+  assert.deepEqual(resolveWorkspacePrincipal(config, '101'), admin);
+  assert.equal(resolveWorkspacePrincipal(config, '202'), null);
+  assert.equal(resolveWorkspacePrincipal({...pilot, multiUserEnabled: false}, '202'), null);
+  assert.deepEqual(resolveWorkspacePrincipal(pilot, '202'), {userId: 'github:202', githubId: '202', role: 'member'});
+  assert.deepEqual(resolveWorkspacePrincipal(pilot, '101'), admin);
+  assert.equal(resolveWorkspacePrincipal(pilot, '404'), null);
+  for (const extra of [{allowedGitHubIds: ['0202']}, {allowedGitHubIds: ['202', '202']}, {allowedGitHubIds: [202]}, {allowedGitHubIds: '202'}, {allowedGitHubIds: Array.from({length: 101}, (_, index) => String(index + 1))}, {multiUserEnabled: 'true'}, {workbenchOwnerId: 'github:202'}]) {
+    assert.equal(resolveWorkspacePrincipal({...pilot, ...extra}, '202'), null);
+    assert.equal(isGitHubLoginConfigured({...pilot, ...extra}), false);
+  }
+  const member = {provider: 'github', userId: 'github:202', githubId: '202', role: 'member'};
+  assert.equal(isWorkbenchUserAllowed(pilot, member), true);
+  for (const extra of [{userId: config.workbenchOwnerId}, {githubId: '303'}, {githubId: 202}, {role: 'admin'}, {provider: 'native'}]) {
+    assert.equal(isWorkbenchUserAllowed(pilot, {...member, ...extra}), false);
+  }
+});
+
+test('pilot callbacks preserve the owner and assign isolated member sessions with no email or login mapping', async t => {
+  const pilot = {multiUserEnabled: true, allowedGitHubIds: ['202', '303']};
+  for (const [id, userId, role] of [[101, config.workbenchOwnerId, 'admin'], [202, 'github:202', 'member'], [303, 'github:303', 'member']]) {
+    const f = fixture({config: pilot, user: {id, login: 'fixture-owner', email: 'same@example.invalid'}});
+    t.after(() => f.db.close());
+    const signed = await signIn(f);
+    assert.equal(signed.result.headers.get('location'), '/');
+    const session = await f.auth.getSession(request('/', signed.sessionCookie));
+    assert.equal(session.userId, userId);
+    assert.equal(session.githubId, String(id));
+    assert.equal(session.role, role);
+    const row = f.db.sql.prepare('SELECT * FROM workbench_github_sessions').get();
+    assert.equal(row.github_id, String(id));
+    assert.equal(row.owner_id, userId);
+    assert.equal(JSON.stringify(row).includes(TOKEN), false);
+  }
+  for (const settings of [{}, {multiUserEnabled: false, allowedGitHubIds: ['202']}, {...pilot, allowedGitHubIds: ['303']}]) {
+    const f = fixture({config: settings, user: {id: 202, login: 'fixture-owner', email: 'same@example.invalid'}});
+    t.after(() => f.db.close());
+    assert.equal((await signIn(f)).result.headers.get('location'), '/access?auth=forbidden');
+    assert.equal(f.db.sql.prepare('SELECT count(*) AS count FROM workbench_github_sessions').get().count, 0);
+  }
+});
+
+test('pilot policy changes invalidate member sessions and pending callbacks while legacy owner-only keys remain compatible', async () => {
+  const pilot = {multiUserEnabled: true, allowedGitHubIds: ['202', '303']};
+  const f = fixture({config: pilot, user: {id: 202}}), signed = await signIn(f), pending = await start(f);
+  try {
+    const reordered = createGitHubAuth({config: {...config, ...pilot, allowedGitHubIds: ['303', '202']}, db: f.db, fetcher: f.fetcher, now: f.now});
+    assert.ok(await reordered.getSession(request('/', signed.sessionCookie)));
+    for (const changed of [{multiUserEnabled: false}, {allowedGitHubIds: ['303']}, {sessionVersion: '2'}]) {
+      const auth = createGitHubAuth({config: {...config, ...pilot, ...changed}, db: f.db, fetcher: f.fetcher, now: f.now});
+      assert.equal(await auth.getSession(request('/', signed.sessionCookie)), null);
+      const before = f.calls.length;
+      const callback = await auth.callback(request(`/api/auth/github/callback?state=${pending.state}&code=inert_code`, pending.cookie));
+      assert.equal(callback.headers.get('location'), '/access?auth=invalid');
+      assert.equal(f.calls.length, before);
+    }
+    f.db.sql.prepare('UPDATE workbench_github_sessions SET owner_id = ?').run(config.workbenchOwnerId);
+    assert.equal(await f.auth.getSession(request('/', signed.sessionCookie)), null);
+  } finally {f.db.close();}
+  const owner = fixture(), login = await signIn(owner);
+  try {
+    const stored = owner.db.sql.prepare('SELECT config_key FROM workbench_github_sessions').get();
+    assert.equal(stored.config_key, await hash(JSON.stringify([config.origin, config.clientId, config.githubOwnerId, config.workbenchOwnerId, '1'])));
+    const explicit = createGitHubAuth({config: {...config, multiUserEnabled: false, allowedGitHubIds: []}, db: owner.db, fetcher: owner.fetcher, now: owner.now});
+    assert.equal((await explicit.getSession(request('/', login.sessionCookie))).userId, config.workbenchOwnerId);
+  } finally {owner.db.close();}
+});
+
+test('member logout, expiry and allowlist removal revoke only the bound session without promoting the administrator', async () => {
+  const pilot = {...config, multiUserEnabled: true, allowedGitHubIds: ['202', '303']};
+  const f = fixture({config: pilot, user: {id: 202}});
+  try {
+    const signed = await signIn(f), session = await f.auth.getSession(request('/', signed.sessionCookie));
+    const denied = await f.auth.logout(request('/api/auth/github/logout', signed.sessionCookie, {method: 'POST', headers: {Origin: ORIGIN, 'X-Workbench-CSRF': 'wrong'}}));
+    assert.equal(denied.status, 403);
+    assert.equal((await f.auth.getSession(request('/', signed.sessionCookie))).role, 'member');
+    const loggedOut = await f.auth.logout(request('/api/auth/github/logout', signed.sessionCookie, {method: 'POST', headers: {Origin: ORIGIN, 'X-Workbench-CSRF': session.csrfToken}}));
+    assert.equal(loggedOut.status, 200);
+    assert.equal(await f.auth.getSession(request('/', signed.sessionCookie)), null);
+    const removed = await signIn(f);
+    const restricted = createGitHubAuth({config: {...pilot, allowedGitHubIds: ['303']}, db: f.db, fetcher: f.fetcher, now: f.now});
+    assert.equal(await restricted.getSession(request('/', removed.sessionCookie)), null);
+    assert.equal((await restricted.logout(request('/api/auth/github/logout', removed.sessionCookie, {method: 'POST', headers: {Origin: ORIGIN}}))).status, 401);
+    assert.equal(await f.auth.getSession(request('/', removed.sessionCookie)), null);
+    const expired = await signIn(f);
+    f.advance(43201);
+    assert.equal(await f.auth.getSession(request('/', expired.sessionCookie)), null);
+    assert.equal((await f.auth.logout(request('/api/auth/github/logout', expired.sessionCookie, {method: 'POST', headers: {Origin: ORIGIN}}))).status, 401);
+    assert.equal(f.db.sql.prepare('SELECT count(*) AS count FROM workbench_github_sessions').get().count, 0);
+  } finally {f.db.close();}
+});
+
+test('simultaneous pilot sessions cannot use each other CSRF token and logout preserves the other member', async () => {
+  const user = {id: 202}, f = fixture({config: {multiUserEnabled: true, allowedGitHubIds: ['202', '303']}, user});
+  try {
+    const a = await signIn(f), identityA = await f.auth.getSession(request('/', a.sessionCookie));
+    user.id = 303;
+    const b = await signIn(f), identityB = await f.auth.getSession(request('/', b.sessionCookie));
+    assert.notEqual(identityA.userId, identityB.userId);
+    const mixed = await f.auth.logout(request('/api/auth/github/logout', a.sessionCookie, {method: 'POST', headers: {Origin: ORIGIN, 'X-Workbench-CSRF': identityB.csrfToken}}));
+    assert.equal(mixed.status, 403);
+    assert.equal((await f.auth.getSession(request('/', a.sessionCookie))).githubId, '202');
+    assert.equal((await f.auth.getSession(request('/', b.sessionCookie))).githubId, '303');
+    const logoutA = await f.auth.logout(request('/api/auth/github/logout', a.sessionCookie, {method: 'POST', headers: {Origin: ORIGIN, 'X-Workbench-CSRF': identityA.csrfToken}}));
+    assert.equal(logoutA.status, 200);
+    assert.equal(await f.auth.getSession(request('/', a.sessionCookie)), null);
+    assert.equal((await f.auth.getSession(request('/', b.sessionCookie))).userId, 'github:303');
+  } finally {f.db.close();}
 });
 
 test('provider consent denial consumes the bound state without fetching and cannot be replayed', async () => {

@@ -47,6 +47,9 @@ test('REA static projection keeps declared coverage, exact report byte hash and 
   assert.equal(result.provenance.report_sha256, sha(raw));
   assert.equal(result.provenance.provider_contract_version, '1');
   assert.equal(result.provenance.contract_source_package_version, '6.4.0');
+  assert.equal(result.provenance.native_findings_declared, 1);
+  assert.equal(result.provenance.observations_imported, 1);
+  assert.deepEqual(result.provenance.observations_omitted_by_reason, {});
   assert.equal(result.provenance.coverage_declared.status, 'complete');
   assert.equal(result.provenance.execution_verified, false);
   assert.equal(result.provenance.network_isolation_verified, false);
@@ -143,12 +146,59 @@ test('benign or runtime/unknown observations do not become vulnerabilities or co
   assert.equal((await parseReaEvidence(bytes(input))).findings.length, 0);
 });
 
+test('omission reasons account for every received observation without retaining external labels or values', async () => {
+  const input = fixture(), graph = input.normalized_result.graph;
+  const node = graph.nodes[0], original = structuredClone(node.observations[0]);
+  node.observations.push(structuredClone(original)); // A duplicate is omitted, not imported twice.
+  const add = mutate => {
+    const item = structuredClone(original);
+    item.observation_id = 'jag_observation_' + node.observations.length.toString(16).padStart(64, '0');
+    mutate(item.evidence);
+    node.observations.push(item);
+  };
+  add(fact => { fact.authority = 'private-authority-value'; });
+  add(fact => { fact.state = 'private-state-value'; });
+  add(fact => { fact.artifact.available = false; });
+  add(fact => { fact.location.value.kind = 'private-location-value'; });
+  graph.nodes.push({ node_id: 'jag_node_' + '4'.repeat(64), kind: 'private-kind-value', observations: [original] });
+  const result = await parseReaEvidence(bytes(input)), p = result.provenance;
+  assert.equal(p.native_findings_declared, 1);
+  assert.equal(p.observations_seen, 7);
+  assert.equal(p.observations_imported, 1);
+  assert.equal(p.observations_omitted, 6);
+  assert.deepEqual(p.observations_omitted_by_reason, {
+    unsupported_node_kind: 1, unsupported_evidence_authority: 1, unsupported_evidence_state: 1,
+    artifact_or_location_unavailable: 1, unsupported_location_kind: 1, duplicate_observation: 1,
+  });
+  assert.equal(Object.values(p.observations_omitted_by_reason).reduce((sum, amount) => sum + amount, 0), p.observations_omitted);
+  assert.match(result.omissions.join('\n'), /Motivos de omissão: tipo de nó fora da projeção: 1/);
+  for (const value of ['private-authority-value', 'private-state-value', 'private-location-value', 'private-kind-value', 'inert-secret']) {
+    assert.equal(JSON.stringify(result).includes(value), false);
+  }
+});
+
+test('native findings and graph observations remain distinct counts for inventory-only projections', async () => {
+  const input = fixture(), node = input.normalized_result.graph.nodes[0];
+  node.kind = 'javascript-asset';
+  node.observations = Array.from({ length: 4 }, () => structuredClone(node.observations[0]));
+  const result = await parseReaEvidence(bytes(input));
+  assert.equal(result.provenance.native_findings_declared, 1);
+  assert.equal(result.provenance.observations_seen, 4);
+  assert.equal(result.provenance.observations_imported, 0);
+  assert.equal(result.findings.length, 0);
+  assert.equal(result.provenance.observations_omitted, 4);
+  assert.deepEqual(result.provenance.observations_omitted_by_reason, { unsupported_node_kind: 4 });
+});
+
 test('node, total observation and candidate bounds stay explicit without silently dropping coverage', async () => {
   const input = fixture(), node = input.normalized_result.graph.nodes[0], original = structuredClone(node.observations[0]);
   for (let index = 1; index < 105; index++) node.observations.push({ ...original, observation_id: 'jag_observation_' + index.toString(16).padStart(64, '0') });
   const result = await parseReaEvidence(bytes(input));
   assert.equal(result.findings.length, 100);
   assert.equal(result.provenance.observations_omitted, 5);
+  assert.equal(result.provenance.observations_imported, 100);
+  assert.equal(result.provenance.observations_seen, 105);
+  assert.deepEqual(result.provenance.observations_omitted_by_reason, { candidate_limit: 5 });
   assert.equal(result.partial, true);
   const tooMany = fixture();
   tooMany.normalized_result.graph.nodes = Array(1001).fill({});

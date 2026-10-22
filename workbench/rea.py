@@ -30,6 +30,15 @@ STRUCTURAL_KINDS = {
     "ipc-handler", "browser-window",
 }
 STATIC_AUTHORITIES = {"ast-static-analysis", "static-relationship-inference"}
+OMISSION_REASONS = {
+    "unsupported_node_kind": "tipo de nó fora da projeção",
+    "unsupported_evidence_authority": "autoridade da evidência fora do subconjunto estático",
+    "unsupported_evidence_state": "estado da evidência não aceito",
+    "artifact_or_location_unavailable": "artefato ou localização indisponível",
+    "unsupported_location_kind": "localização sem intervalo de fonte",
+    "duplicate_observation": "observação duplicada",
+    "candidate_limit": "limite de candidatos",
+}
 
 
 def _invalid() -> ValueError:
@@ -197,7 +206,7 @@ def _parse_rea_evidence(data: bytes) -> dict:
     parsed = _count(statistics.get("parsed_javascript_files"), files)
     failures = _count(statistics.get("parse_failures"), files)
     byte_count = _count(statistics.get("text_bytes_read"), 25 * 1024 * 1024)
-    _count(statistics.get("findings"), 1000000)
+    native_findings = _count(statistics.get("findings"), 1000000)
     graph = _object(result.get("graph"))
     if graph.get("schema") != "JavaScriptApplicationGraph":
         raise _invalid()
@@ -207,6 +216,13 @@ def _parse_rea_evidence(data: bytes) -> dict:
         raise _invalid()
     findings, seen, node_ids = [], set(), set()
     observed, omitted = 0, 0
+    omission_counts = dict.fromkeys(OMISSION_REASONS, 0)
+
+    def omit(reason: str) -> None:
+        nonlocal omitted
+        omitted += 1
+        omission_counts[reason] += 1
+
     for node in nodes:
         node = _object(node)
         node_id = _digest(node.get("node_id"), "jag_node_")
@@ -225,25 +241,28 @@ def _parse_rea_evidence(data: bytes) -> dict:
             if not isinstance(kind, str):
                 raise _invalid()
             if kind not in STRUCTURAL_KINDS:
-                omitted += 1
+                omit("unsupported_node_kind")
                 continue
             fact = _object(observation.get("evidence"))
             if not isinstance(fact.get("authority"), str) or not isinstance(fact.get("state"), str):
                 raise _invalid()
-            if fact.get("authority") not in STATIC_AUTHORITIES or fact.get("state") not in {"observed", "inferred"}:
-                omitted += 1
+            if fact.get("authority") not in STATIC_AUTHORITIES:
+                omit("unsupported_evidence_authority")
+                continue
+            if fact.get("state") not in {"observed", "inferred"}:
+                omit("unsupported_evidence_state")
                 continue
             observation_id = _digest(observation.get("observation_id"), "jag_observation_")
             artifact, location = _object(fact.get("artifact")), _object(fact.get("location"))
             if artifact.get("available") is not True or location.get("available") is not True:
-                omitted += 1
+                omit("artifact_or_location_unavailable")
                 continue
             artifact_digest = _digest(artifact.get("sha256"))
             if artifact.get("artifact_id") != f"art_{artifact_digest}":
                 raise _invalid()
             place = _object(location.get("value"))
             if place.get("kind") != "source-range":
-                omitted += 1
+                omit("unsupported_location_kind")
                 continue
             path = _path(place.get("source"))
             start, end = _object(place.get("start")), _object(place.get("end"))
@@ -253,10 +272,11 @@ def _parse_rea_evidence(data: bytes) -> dict:
                 raise _invalid()
             token = fingerprint(f"rea-structural-{kind}", path, observation_id)
             if token in seen:
+                omit("duplicate_observation")
                 continue
             seen.add(token)
             if len(findings) >= MAX_CANDIDATES:
-                omitted += 1
+                omit("candidate_limit")
                 continue
             findings.append({
                 "fingerprint": token, "kind": f"rea-structural-{kind}", "path": path,
@@ -268,20 +288,25 @@ def _parse_rea_evidence(data: bytes) -> dict:
     roots = graph.get("root_node_ids")
     if not isinstance(roots, list) or not 1 <= len(roots) <= 32 or any(root not in node_ids for root in roots):
         raise _invalid()
+    omitted_by_reason = {reason: amount for reason, amount in omission_counts.items() if amount}
+    reason_summary = "; ".join(f"{OMISSION_REASONS[reason]}: {amount}" for reason, amount in omitted_by_reason.items())
     return {
         "snapshot_digest": root_digest, "files_read": parsed, "bytes_read": byte_count,
         "partial": True, "dependencies": [], "findings": findings,
         "omissions": [
             "REA importado: execução, isolamento, origem e vínculo com o commit não foram comprovados pelo Workbench.",
             "Cobertura e hashes do artefato são declarados no JSON; assinaturas e digests internos do REA não foram autenticados.",
-            f"Projeção limitada: {omitted} observações não importadas; {failures} falhas de parse declaradas. Não avalia CVEs nem executa o alvo.",
+            f"Projeção limitada: {len(findings)} observações importadas; {omitted} observações não importadas; {failures} falhas de parse declaradas. Não avalia CVEs nem executa o alvo.",
+            *([f"Motivos de omissão: {reason_summary}."] if reason_summary else []),
         ],
         "provenance": {
             "schema": "security-workbench.rea-import/v1", "report_sha256": hashlib.sha256(data).hexdigest(),
             "evidence_id_declared": evidence_id, "root_artifact_sha256_declared": root_digest,
             "contract_source_commit": SOURCE_COMMIT, "contract_source_package_version": "6.4.0",
             "provider_contract_version": "1", "coverage_declared": coverage,
-            "relevant_files_declared": files, "observations_seen": observed, "observations_omitted": omitted,
+            "relevant_files_declared": files, "native_findings_declared": native_findings,
+            "observations_seen": observed, "observations_imported": len(findings), "observations_omitted": omitted,
+            "observations_omitted_by_reason": omitted_by_reason,
             "execution_verified": False, "network_isolation_verified": False, "artifact_bytes_verified": False,
         },
     }

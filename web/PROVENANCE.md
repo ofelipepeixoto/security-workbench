@@ -12,4 +12,4 @@ Helpers de build/autenticação e configuração vieram do starter Vinext de Sit
 
 `drizzle/0000_careful_shriek.sql`, `drizzle/meta/0000_snapshot.json` e `_journal.json` foram gerados por `drizzle-kit generate` a partir das três tabelas da aplicação, sem dados de usuário.
 
-`.openai/hosting.json` identifica o Site publicado e o binding isolado `DB`; o ID não é credencial. A audiência pública do Site não libera a API sem identidade ChatGPT. `.sites-runtime`, `.wrangler`, `.env*`, bancos, node_modules, artefatos de build e credenciais não fazem parte da fonte versionada.
+`.openai/hosting.json` identifica o Site publicado e o binding isolado `DB`; o ID não é credencial. A audiência pública do Site não libera a API sem sessão GitHub do proprietário validada no servidor. O helper ChatGPT herdado não é o autenticador da operação atual. `.sites-runtime`, `.wrangler`, `.env*`, bancos, node_modules, artefatos de build e credenciais não fazem parte da fonte versionada.

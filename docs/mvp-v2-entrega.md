@@ -307,3 +307,39 @@ App, credenciais, recursos QA, migrations remotas, duas sessões reais, restore,
 Queue/scheduler, revogação, desktop/mobile/teclado e exportação realmente aberta
 continuam **bloqueados na homologação hospedada**. Nenhuma contratação, chamada
 paga, REA reinstalado/reexecutado, Supabase acrescentado ou lançamento público.
+
+## Adendo — execução QA e diagnóstico do PR #42, 22/10/2026 UTC
+
+PR [#42](https://github.com/ofelipepeixoto/security-workbench/pull/42) permanece
+em rascunho, dependente da branch da correção #41. Sem merge. O
+[registro verificável](qa-execucao-2026-10-22.md) e o adendo da proposta QA
+descrevem recursos reais, migrations/backup/restauração e bloqueios restantes.
+
+| Head remoto | CI concluída |
+| --- | --- |
+| #41 `ced53ffe3326bf2afb3f9abf94b86b6ef5f46527` | [39713248169](https://github.com/ofelipepeixoto/security-workbench/actions/runs/39713248169): sucesso |
+| #42 diagnóstico `d82775ea1fadc76f143f741db769e37d147cff75` | [39718036878](https://github.com/ofelipepeixoto/security-workbench/actions/runs/39718036878): 4/4 aprovados |
+| #42 empacotamento `f04544dc893aa05f6a5233c8c608934baf89e5ec` | [39718517124](https://github.com/ofelipepeixoto/security-workbench/actions/runs/39718517124): 4/4 aprovados |
+| #42 correção mobile/código hospedado `e361bc8b2a10cba5e2755320f4fa28bbdaadcaa0` | [39719974739](https://github.com/ofelipepeixoto/security-workbench/actions/runs/39719974739): 3 aprovados; smoke público falhou com HTTP 403/remaining=0 comprovado |
+
+A causa da primeira falha (39715990883) permanece inconclusiva por falta de
+telemetria no log antigo. Não atribuir automaticamente o rate limit novo ao
+evento antigo. Diagnóstico novo sanitizado mantém assertivas, revisão fixa,
+prazo e exit code de falha, sem skip/token/retry ou timeout ampliado. Nenhum
+conteúdo adquirido, bundle, credencial ou log bruto foi anexado publicamente.
+
+Conta existente e Free confirmados; cinco recursos QA criados. D1 operacional
+recebeu migrations 0000–0006 com preflight/checagem por batch; backup SQL lógico
+de 12 registros sintéticos/39 objetos restaurado e comparado no segundo D1,
+sem vínculo desse banco aos Workers. HTTP e interface inerte reais conferidos;
+correção de overflow mobile preserva acessibilidade. Local: 230 testes Node,
+lint/TypeScript/build aprovados antes da pequena extensão do gate offline;
+após a extensão, a suíte completa passou com **231/231** testes, sem skips.
+
+GitHub reautenticado pelo proprietário; App/OAuth QA registrados sob
+ofelipepeixoto, sem instalações. Ativação A/B/App/processamento já autorizada,
+mas ainda impedida pelos client secrets protegidos e fixtures não selecionadas.
+Chave AES QA criada sem revelar valor. Flags off, cron ausente, zero consumidor
+Queue, zero job/sessão/ativação da janela. Fluxos reais A/B, revogação, jobs,
+scheduler, revisão/comparação/exportação continuam bloqueados tecnicamente,
+nunca marcados como aprovados por mocks. Produção pública permanece v15.

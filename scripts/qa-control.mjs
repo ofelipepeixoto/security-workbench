@@ -13,7 +13,12 @@ export function validateQaManifest(m,{now=Date.now(),activation=false}={}) {
   // rather than treating an existing subscription as permission for overages.
   const required={workers:2,databases:2,queues:1,cron:1,workerRequests:5000,d1ReadRows:1000000,d1WriteRows:20000,d1StorageBytes:20*1024*1024,queueOperations:8000};
   for(const [key,n] of Object.entries(required))if(!Number.isFinite(m.remaining?.[key])||m.remaining[key]<n)fail();
-  if(!Array.isArray(m.productionResourceIds)||!m.productionResourceIds.length)fail();
+  if(!Array.isArray(m.productionResourceIds))fail();
+  // Sites does not expose its provider resource IDs. Do not invent them or
+  // silently waive isolation: require the independently recorded empty-account
+  // inventory while the existing Sites production was live, in addition to the
+  // explicit managed-production boundary. This remains an offline attestation.
+  if(!m.productionResourceIds.length&&!(m.productionManagedBySites===true&&m.qaAccountInitiallyEmptyVerified===true))fail();
   const ids=[m.databaseId,m.restoreDatabaseId,m.queueId];
   if(ids.some(x=>typeof x!=='string'||!x||x.includes('<')||m.productionResourceIds.includes(x))||new Set(ids).size!==3)fail();
   if(Object.entries(QA_NAMES).some(([k,v])=>m.names?.[k]!==v))fail();

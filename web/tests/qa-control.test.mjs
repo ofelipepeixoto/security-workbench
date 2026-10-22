@@ -20,3 +20,11 @@ test('activation is fresh, seven days, explicit INSERT only; closeout retains ev
   assert.throws(()=>activationSql({...manifest(),activationAt:new Date(now-600000).toISOString()},{now}));
   assert.match(closeSql(),/COALESCE\(closed_at,unixepoch\(\)\*1000\)/);assert.doesNotMatch(closeSql(),/^DELETE /m);
 });
+test('Sites-managed production requires explicit empty-account evidence rather than invented provider IDs',()=>{
+  const m={...manifest(),productionResourceIds:[],productionManagedBySites:true,qaAccountInitiallyEmptyVerified:true};
+  validateQaManifest(m,{now});
+  for(const patch of [{productionManagedBySites:false},{qaAccountInitiallyEmptyVerified:false},{productionResourceIds:undefined},
+    {databaseId:m.restoreDatabaseId},{confirmedAccount:false},{workersPlan:'paid'},{compatibilityVerified:false}])
+    assert.throws(()=>validateQaManifest({...m,...patch},{now}));
+  assert.throws(()=>validateQaManifest({...m,productionResourceIds:[m.databaseId]},{now}));
+});

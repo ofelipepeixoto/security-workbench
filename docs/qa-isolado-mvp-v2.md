@@ -297,3 +297,24 @@ Os próximos pedidos, em ordem, são: confirmar conta existente e conferir plano
 consumo pelo painel; depois aprovar os cinco recursos exatos e deploy/migrations
 só em QA; separadamente aprovar clientes/callbacks/segredos protegidos GitHub e
 instalações de fixtures selecionadas. Não repetir consentimento A/B já fornecido.
+
+## Adendo de execução — 22/10/2026 UTC
+
+O [registro de execução](qa-execucao-2026-10-22.md) substitui o estado de bloqueio
+do preflight anterior: conta/plano Free confirmados pelo proprietário, cinco
+recursos exclusivos criados, Workers publicados, migrations QA 0000–0006 e
+backup/restauração lógica com dados sintéticos em D1 real aprovados. Produção
+v15 preservada. Código hospedado: `e361bc8b2a10cba5e2755320f4fa28bbdaadcaa0`.
+
+Login A/B, permissões GitHub e processamento real já foram autorizados depois
+do provisionamento. GitHub App e cliente OAuth exclusivos de QA registrados
+sob ofelipepeixoto; chave de criptografia protegida criada nos dois Workers.
+Faltam client secrets inseridos diretamente no destino protegido, chave exigida
+pelo GitHub para instalar a App e seleção explícita das fixtures. Não solicitar
+novamente autorização genérica para ativação já dada. Flags continuam off até
+a configuração/preflight completos; zero cron/consumidores/janela ativada.
+
+O registro diferencia testes locais de integração real, guarda a evidência do
+rate limit do novo smoke, informa as CIs exatas, e mantém os demais testes
+hospedados bloqueados. Infraestrutura publicada não é piloto homologado ou
+lançamento público. A janela de sete dias ainda não começou.

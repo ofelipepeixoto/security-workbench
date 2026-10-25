@@ -1,8 +1,14 @@
 /** QA-only admission. Activation is an explicit operator action, never startup. */
 import {AnalysisJobError} from './analysis-jobs.mjs';
+import {GitHubAppError} from './github-app-client.mjs';
 
 export const QA_LIMITS=Object.freeze({days:7,jobsPerDay:50,dispatches:3,fetchesPerAttempt:16,bytesPerAttempt:2*1024*1024});
 const ACTORS=new Set(['171351708','322086368']);
+// Read-only views of the already-public pilot policy, not an override. Tests
+// reuse these constants with fabricated provider data instead of copying IDs.
+export const QA_ALLOWED_GITHUB_IDS=Object.freeze([...ACTORS]);
+export const QA_REPOSITORY_NAMESPACES=Object.freeze(['ofelipepeixoto','radartech-news']);
+const REPOSITORY_SCOPE=new RegExp(`^(?:${QA_REPOSITORY_NAMESPACES.join('|')})/[A-Za-z0-9_.-]+$`);
 const deny=(code='qa_closed',status=403)=>new AnalysisJobError(code,status);
 export function createQaGuard({env={},db=env.DB,now=()=>new Date()}={}) {
   if(env?.WORKBENCH_QA_ENABLED!=='true') return undefined;
@@ -22,7 +28,7 @@ export function createQaGuard({env={},db=env.DB,now=()=>new Date()}={}) {
     let fixtures;
     try {fixtures=JSON.parse(w.fixtures_json);}catch {throw deny('qa_scope');}
     if(!Array.isArray(fixtures)||!fixtures.some(f=>f.githubId===actor&&f.repositoryId===repositoryId&&f.installationId===installationId&&(repo===undefined||f.repo===repo)&&
-      /^(ofelipepeixoto|radartech-news)\/[A-Za-z0-9_.-]+$/.test(f.repo)))throw deny('qa_scope');
+      REPOSITORY_SCOPE.test(f.repo)))throw deny('qa_scope');
     return w;
   }
   async function capacity(scope) {
@@ -57,20 +63,39 @@ export function createQaGuard({env={},db=env.DB,now=()=>new Date()}={}) {
  * At most two attempts/job => 32 requests and 4 MiB of response bodies/job.
  * No credentials/response bodies are recorded. Never call a paid AI provider.
  */
-export function qaFetchBudget(fetcher,{now=()=>new Date(),endsAt}={}) {
-  let calls=0,bytes=0;
-  return async(input,init)=>{
+export function qaFetchBudget(fetcher,{now=()=>new Date(),endsAt,observe,beforeRequest}={}) {
+  let attempted=0,admitted=0,sent=0,bytes=0;
+  const stats=()=>({attempted,sent,remaining:QA_LIMITS.fetchesPerAttempt-admitted,bytes});
+  const emit=event=>{try{observe?.({...event,...stats()});}catch{/* diagnostics cannot affect authorization */}};
+  const fail=(code='qa_consumption',status=403)=>{emit({type:'failure',code,status});throw new GitHubAppError(code,status);};
+  const transport=async(input,init)=>{
     const url=new URL(typeof input==='string'||input instanceof URL?input:input.url);
-    if(new Date(now()).valueOf()>=endsAt)throw deny();
-    if(url.protocol!=='https:'||!(url.hostname==='api.github.com'||(url.hostname==='github.com'&&url.pathname==='/login/oauth/access_token'))||++calls>QA_LIMITS.fetchesPerAttempt)throw deny('qa_consumption');
+    const stage=url.pathname==='/user'?'identity':url.pathname==='/user/installations'?'installations':/^\/user\/installations\/\d+\/repositories$/.test(url.pathname)?'repositories':/\/commits\//.test(url.pathname)?'commit':/\/trees\//.test(url.pathname)?'tree':/\/blobs\//.test(url.pathname)?'blob':'other';
+    attempted++;
+    if(new Date(now()).valueOf()>=endsAt)fail('qa_closed');
+    if(init?.signal?.aborted) {if(init.signal.reason instanceof GitHubAppError)throw init.signal.reason;fail('timeout',504);}
+    if(url.protocol!=='https:'||!(url.hostname==='api.github.com'||(url.hostname==='github.com'&&url.pathname==='/login/oauth/access_token'))||admitted>=QA_LIMITS.fetchesPerAttempt)fail();
+    // Reserve synchronously before the async liveness query so parallel calls
+    // cannot both take the last slot. A denied dispatch never refunds a slot.
+    admitted++;
+    await beforeRequest?.();
+    if(new Date(now()).valueOf()>=endsAt)fail('qa_closed');
+    if(init?.signal?.aborted) {
+      if(init.signal.reason instanceof GitHubAppError)throw init.signal.reason;
+      fail('timeout',504);
+    }
+    sent++;emit({type:'request',stage});
     const response=await fetcher(input,{...init,redirect:'manual'}), reader=response.body?.getReader();
+    emit({type:'response',stage,status:response.status});
     if(!reader)return response;
     const chunks=[];
     try {
       while(true) {
         const {done,value}=await reader.read();if(done)break;
         bytes+=value.byteLength;
-        if(bytes>QA_LIMITS.bytesPerAttempt||new Date(now()).valueOf()>=endsAt||init?.signal?.aborted)throw deny('qa_consumption');
+        if(new Date(now()).valueOf()>=endsAt)fail('qa_closed');
+        if(init?.signal?.aborted) {if(init.signal.reason instanceof GitHubAppError)throw init.signal.reason;fail('timeout',504);}
+        if(bytes>QA_LIMITS.bytesPerAttempt)fail();
         chunks.push(value);
       }
     }catch(error){void reader.cancel().catch(()=>{});throw error;}
@@ -79,4 +104,7 @@ export function qaFetchBudget(fetcher,{now=()=>new Date(),endsAt}={}) {
     for(const chunk of chunks){body.set(chunk,offset);offset+=chunk.byteLength;}
     return new Response(body,{status:response.status,statusText:response.statusText,headers:response.headers});
   };
+  transport.stats=stats;
+  transport.canAcquire=reserve=>Number.isSafeInteger(reserve)&&reserve>=0&&stats().remaining>reserve;
+  return transport;
 }

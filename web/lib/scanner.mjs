@@ -1,4 +1,5 @@
 /** Bounded, public GitHub acquisition. Rules/texts ported from Workbench PR #6. */
+import {GitHubAppError} from './github-app-client.mjs';
 const OWNER = "ofelipepeixoto";
 const API = "https://api.github.com";
 export const SCANNER_VERSION = "workbench-static/1.1";
@@ -196,7 +197,7 @@ export async function inspectGitHub(repo, boundRepositoryId, revision = null, {f
   });
 }
 
-async function acquirePinned(repo, boundRepositoryId, revision, get, source) {
+async function acquirePinned(repo, boundRepositoryId, revision, get, source, acquisitionBudget) {
   const prefix = `/repos/${repo}`;
     const commit = await get(`${prefix}/git/commits/${revision}`);
     if (sha(commit.sha) !== revision) throw new Error("Commit divergente do solicitado.");
@@ -215,7 +216,9 @@ async function acquirePinned(repo, boundRepositoryId, revision, get, source) {
     let filesRead = 0, bytesRead = 0, filesAcquired = 0, bytesAcquired = 0, binarySkipped = 0, overSizeSkipped = 0;
     let findingsTotal = 0, dependenciesTotal = 0;
     if (listing.truncated) omissions.push("Árvore GitHub truncada; cobertura parcial.");
-    for (const item of [...listing.tree].sort((a, b) => utf8Order(a.path, b.path))) {
+    const entries = [...listing.tree].sort((a, b) => utf8Order(a.path, b.path));
+    let budgetOmitted = 0;
+    for (const [index, item] of entries.entries()) {
       const path = item.path;
       if (item.type === "tree") continue;
       const excluded = eligible(path);
@@ -226,6 +229,11 @@ async function acquirePinned(repo, boundRepositoryId, revision, get, source) {
       const size = item.size;
       if (!Number.isSafeInteger(size) || size < 0 || size > SCANNER_LIMITS.fileBytes) {omissions.push(`${path}: tamanho ausente ou acima de 256 KiB`); overSizeSkipped++; continue;}
       if (filesAcquired >= SCANNER_LIMITS.files || bytesAcquired + size > SCANNER_LIMITS.bytes) {omissions.push("Limite web de 20 arquivos ou 2 MiB atingido; cobertura parcial."); break;}
+      if (acquisitionBudget && !acquisitionBudget.canAcquire()) {
+        budgetOmitted = entries.slice(index).filter(entry => entry.type === 'blob' && ['100644','100755'].includes(entry.mode) && !eligible(entry.path) && Number.isSafeInteger(entry.size) && entry.size >= 0 && entry.size <= SCANNER_LIMITS.fileBytes).length;
+        omissions.push(`${budgetOmitted} entradas elegíveis não adquiridas: orçamento QA reservado para as revalidações finais. Cobertura parcial; limite de 16 requisições por tentativa.`);
+        break;
+      }
       const blobSha = sha(item.sha), blob = await get(`${prefix}/git/blobs/${blobSha}`);
       if (sha(blob.sha) !== blobSha || blob.encoding !== "base64" || blob.size !== size) throw new Error(`Blob divergente: ${path}`);
       const data = decodeBase64(blob.content);
@@ -245,35 +253,49 @@ async function acquirePinned(repo, boundRepositoryId, revision, get, source) {
     if (excludedCount) omissions.push(`${excludedCount} arquivos fora da política de cobertura; contagens por motivo disponíveis nos detalhes.`);
     if (findingsTotal > findings.length) omissions.push("Limite de 100 candidatos no piloto web; cobertura parcial de achados.");
     if (dependenciesTotal > dependencies.length) omissions.push("Limite de 500 dependências no piloto web; inventário parcial.");
-    return {revision, repository_id: boundRepositoryId, snapshot_digest: hex(await hash("SHA-256", concat(digestParts))), files_read: filesRead, bytes_read: bytesRead, files_acquired: filesAcquired, bytes_acquired: bytesAcquired, binary_skipped: binarySkipped, oversized_skipped: overSizeSkipped, findings_total: findingsTotal, dependencies_total: dependenciesTotal, partial: omissions.length > 0, omissions: omissions.slice(0, 50), findings, dependencies, source, verified_revision: true, limits: SCANNER_LIMITS, engine_version: SCANNER_VERSION, coverage: {policy: COVERAGE_POLICY, exclusions_by_reason: exclusions, files_excluded: excludedCount, dependency_analysis: "inventory_only", advisory_coverage: "unavailable"}};
+    return {revision, repository_id: boundRepositoryId, snapshot_digest: hex(await hash("SHA-256", concat(digestParts))), files_read: filesRead, bytes_read: bytesRead, files_acquired: filesAcquired, bytes_acquired: bytesAcquired, binary_skipped: binarySkipped, oversized_skipped: overSizeSkipped, findings_total: findingsTotal, dependencies_total: dependenciesTotal, partial: omissions.length > 0, omissions: omissions.slice(0, 50), findings, dependencies, source, verified_revision: true, limits: SCANNER_LIMITS, engine_version: SCANNER_VERSION, coverage: {policy: COVERAGE_POLICY, exclusions_by_reason: exclusions, files_excluded: excludedCount, dependency_analysis: "inventory_only", advisory_coverage: "unavailable", ...(acquisitionBudget?{acquisition_budget:{requests_limit:16,requests_reserved:acquisitionBudget.reserved,omitted_files:budgetOmitted}}:{})}};
  }
 
 /** Server-only App adapter: identity/permission is revalidated through the user
  * access token. No target scripts, package installation or raw URLs are used. */
-export async function inspectGitHubApp({client, installationId, repositoryId: expectedId, revision}) {
+export async function inspectGitHubApp({client, installationId, repositoryId: expectedId, revision, initialAuthorization, revalidateConnection, acquisitionBudget, checkpoint, observe}) {
   expectedId = repositoryId(expectedId);
   revision = sha(revision);
   if (!client?.authorizeRepository || !client?.readTree || !client?.readBlob) throw new Error("Transporte autorizado indisponível.");
+  const emit=event=>{try{observe?.(event);}catch{/* optional diagnostics cannot change the result */}};
   let timer, closed = false;
   const timeout = new Promise((_, reject) => { timer = setTimeout(() => { closed = true; reject(new GitHubAcquisitionTimeoutError()); }, SCANNER_LIMITS.deadlineMs); });
   const work = async () => {
-    const authorized = await client.authorizeRepository({installationId, repositoryId: expectedId, revision});
+    emit({type:'phase',phase:'scanner_initial'});
+    await checkpoint?.();
+    if (revalidateConnection && await revalidateConnection() !== client) throw new GitHubAppError('disconnected',401);
+    // Only the same client's opaque, single-use capability may bridge the
+    // adjacent job precheck and scanner entry. Serialized browser data cannot.
+    const authorized = initialAuthorization === undefined
+      ? await client.authorizeRepository({installationId, repositoryId: expectedId, revision})
+      : client.consumeAcquisitionAuthorization(initialAuthorization,{installationId,repositoryId:expectedId,revision});
     const repo = authorized.repository?.full_name;
     if (authorized.repository?.id !== expectedId || authorized.revision !== revision || typeof repo !== "string" || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo) || repo.includes("..")) throw new Error("Identidade autorizada divergente.");
     const treeSha = sha(authorized.tree_sha), prefix = `/repos/${repo}`;
     const get = async (path) => {
       if (closed) throw new GitHubAcquisitionTimeoutError();
-      if (path === `${prefix}/git/commits/${revision}`) return {sha: revision, tree: {sha: treeSha}};
+      if (path === `${prefix}/git/commits/${revision}`) {await checkpoint?.();return {sha: revision, tree: {sha: treeSha}};}
+      // Remote tree/blob reads are gated immediately before dispatch by the
+      // same shared transport, including every paginated authorization request.
       if (path === `${prefix}/git/trees/${treeSha}?recursive=1`) return client.readTree({installationId, repositoryId: expectedId, treeSha});
       const blobPrefix = `${prefix}/git/blobs/`;
       if (path.startsWith(blobPrefix) && SHA.test(path.slice(blobPrefix.length))) return client.readBlob({installationId, repositoryId: expectedId, blobSha: path.slice(blobPrefix.length)});
       throw new Error("Recurso fora do transporte autorizado.");
     };
-    const result = await acquirePinned(repo, expectedId, revision, get, "github-app");
+    emit({type:'phase',phase:'acquisition'});
+    const result = await acquirePinned(repo, expectedId, revision, get, "github-app", acquisitionBudget);
     if (closed) throw new GitHubAcquisitionTimeoutError();
     // Permissions, rename, transfer and visibility can change during acquisition.
+    emit({type:'phase',phase:'authorization_after_acquisition'});
+    await checkpoint?.();
+    if (revalidateConnection && await revalidateConnection() !== client) throw new GitHubAppError('disconnected',401);
     const current = await client.authorizeRepository({installationId, repositoryId: expectedId, revision});
-    if (current.repository?.full_name !== repo || current.repository?.private !== authorized.repository.private || current.revision !== revision) throw new Error("O acesso mudou durante a análise.");
+    if (current.repository?.full_name !== repo || current.repository?.private !== authorized.repository.private || current.repository?.visibility !== authorized.repository.visibility || current.revision !== revision || current.tree_sha !== authorized.tree_sha) throw new GitHubAppError('forbidden',403);
     return result;
   };
   try {return await Promise.race([work(), timeout]);} finally {closed = true; clearTimeout(timer);}

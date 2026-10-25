@@ -7,7 +7,8 @@ import {createAnalysisJobs} from '../lib/analysis-jobs.mjs';
 import {createAnalysisConsumer} from '../workers/analysis-consumer.mjs';
 import {createWorkbenchService} from '../lib/workbench-service.mjs';
 
-const START=Date.parse('2026-10-22T12:00:00Z'), SHA='a'.repeat(40);
+// Claims are anchored to SQL time; retain relative seven-day boundaries in CI.
+const START=Date.now(), SHA='a'.repeat(40);
 const A='171351708',B='322086368',ownerA='qa-primary',ownerB=`github:${B}`;
 const fixtures=[{githubId:A,installationId:11,repositoryId:21,repo:'ofelipepeixoto/qa-fixture-a'},
   {githubId:B,installationId:12,repositoryId:22,repo:'radartech-news/qa-fixture-b'}];

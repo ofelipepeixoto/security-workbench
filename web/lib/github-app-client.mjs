@@ -17,6 +17,9 @@ const MESSAGES = Object.freeze({
   incomplete: 'A sincronização atingiu o limite de páginas. O acesso não foi confirmado.',
   rate_limited: 'A cota GitHub foi atingida. Aguarde o horário de nova tentativa.',
   timeout: 'O GitHub não respondeu dentro do prazo permitido.',
+  qa_consumption: 'O limite de aquisição desta tentativa de QA foi atingido.',
+  qa_closed: 'A janela de QA não está ativa. Novas leituras estão bloqueadas.',
+  cancelled: 'O job foi cancelado.',
 });
 
 export class GitHubAppError extends Error {
@@ -114,6 +117,9 @@ export function createGitHubAppClient({ accessToken, expectedGitHubId, appId, fe
   if (!TOKEN.test(accessToken ?? '') || String(id(expectedGitHubId)) !== String(expectedGitHubId) || !Number.isInteger(maxPages) || maxPages < 1 || maxPages > 20) throw new GitHubAppError('disconnected', 401);
   const expectedAppId = id(appId);
   const authorized = new Map();
+  // Tickets are private capabilities of this client, never serialized grants.
+  const acquisitionTickets = new WeakMap();
+  let authorizationEpoch = 0, requestCount = 0, authorizationCost = 0;
   let identityChecked = false;
   let nextAllowedAt = null;
   const deadline = Date.now() + 45000;
@@ -121,14 +127,16 @@ export function createGitHubAppClient({ accessToken, expectedGitHubId, appId, fe
   async function get(path) {
     if (nextAllowedAt && timestamp(now) < Date.parse(nextAllowedAt)) throw new GitHubAppError('rate_limited', 429, nextAllowedAt);
     const remaining = Math.min(10000, deadline - Date.now());
+    if (signal?.aborted && signal.reason instanceof GitHubAppError) throw signal.reason;
     if (remaining <= 0 || signal?.aborted) throw new GitHubAppError('timeout', 504);
     const controller = new AbortController();
     let timer;
-    const onAbort = () => controller.abort();
+    const onAbort = () => controller.abort(signal.reason);
     signal?.addEventListener('abort', onAbort, { once: true });
-    const stopped = new Promise((_, reject) => controller.signal.addEventListener('abort', () => reject(new GitHubAppError('timeout', 504)), { once: true }));
+    const stopped = new Promise((_, reject) => controller.signal.addEventListener('abort', () => reject(controller.signal.reason instanceof GitHubAppError ? controller.signal.reason : new GitHubAppError('timeout', 504)), { once: true }));
     timer = setTimeout(() => controller.abort(), remaining);
     try {
+      requestCount++;
       const response = await Promise.race([fetcher(`${API}${path}`, {
         method: 'GET', redirect: 'manual', credentials: 'omit', cache: 'no-store', signal: controller.signal,
         headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${accessToken}`, 'X-GitHub-Api-Version': API_VERSION, 'User-Agent': 'security-workbench-github-app' },
@@ -165,11 +173,12 @@ export function createGitHubAppClient({ accessToken, expectedGitHubId, appId, fe
       const data = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
       if (!data || typeof data !== 'object' || Array.isArray(data)) throw new GitHubAppError('unavailable');
       return { data, link: response.headers.get('link') };
-    } catch (error) { if (error instanceof GitHubAppError) throw error; throw new GitHubAppError('unavailable'); }
+    } catch (error) { if (signal?.aborted && signal.reason instanceof GitHubAppError) throw signal.reason; if (error instanceof GitHubAppError) throw error; throw new GitHubAppError('unavailable'); }
     finally { clearTimeout(timer); signal?.removeEventListener('abort', onAbort); }
   }
 
   async function getIdentity() {
+    identityChecked = false; authorizationEpoch++; authorized.clear();
     const { data } = await get('/user');
     if (String(id(data.id)) !== String(expectedGitHubId) || !LOGIN.test(data.login)) throw new GitHubAppError('disconnected', 401);
     identityChecked = true;
@@ -225,6 +234,7 @@ export function createGitHubAppClient({ accessToken, expectedGitHubId, appId, fe
     if (!Array.isArray(scopes) || scopes.length > 100) throw new GitHubAppError('invalid_request', 400);
     const wanted = scopes.map(scope => ({ installationId: id(scope?.installationId), repositoryId: id(scope?.repositoryId) }));
     if (!wanted.length) return [];
+    authorizationEpoch++;
     const groups = new Map();
     for (const scope of wanted) {
       if (!groups.has(scope.installationId)) groups.set(scope.installationId, new Set());
@@ -279,6 +289,7 @@ export function createGitHubAppClient({ accessToken, expectedGitHubId, appId, fe
     installationId = id(installationId); repositoryId = id(repositoryId);
     const cacheKey = `${installationId}:${repositoryId}`;
     if (!refresh && authorized.has(cacheKey)) return authorized.get(cacheKey);
+    if (refresh) { authorizationEpoch++; authorized.delete(cacheKey); }
     await allowedInstallation(installationId);
     let page = 1;
     for (let index = 0; index < maxPages; index++) {
@@ -304,11 +315,28 @@ export function createGitHubAppClient({ accessToken, expectedGitHubId, appId, fe
     return { repository: repo, revision: data.sha.toLowerCase(), tree_sha: data.commit.tree.sha.toLowerCase() };
   }
 
+  async function authorizeRepository(options = {}) {
+    const before = requestCount, hadIdentity = identityChecked;
+    await allowedRepository(options.installationId, options.repositoryId, true);
+    const access = await resolveCommit(options);
+    authorizationCost = requestCount - before - (hadIdentity ? 0 : 1);
+    return access;
+  }
+
   return {
     getIdentity, listInstallations, listRepositories, resolveCommit, checkRepositoriesAccess, checkRepositoryAccess,
-    async authorizeRepository(options = {}) {
-      await allowedRepository(options.installationId, options.repositoryId, true);
-      return resolveCommit(options);
+    authorizeRepository,
+    authorizationRequestCost: () => authorizationCost,
+    async authorizeForAcquisition(options = {}) {
+      const access = await authorizeRepository(options), ticket = Object.freeze({});
+      acquisitionTickets.set(ticket, { access, epoch: authorizationEpoch, installationId: id(options.installationId), repositoryId: id(options.repositoryId), revision: options.revision?.toLowerCase() });
+      return { access, ticket };
+    },
+    consumeAcquisitionAuthorization(ticket, options = {}) {
+      const grant = acquisitionTickets.get(ticket);
+      acquisitionTickets.delete(ticket);
+      if (!grant || grant.epoch !== authorizationEpoch || grant.installationId !== id(options.installationId) || grant.repositoryId !== id(options.repositoryId) || grant.revision !== options.revision?.toLowerCase()) throw new GitHubAppError('forbidden', 403);
+      return grant.access;
     },
     async readTree({ installationId, repositoryId, treeSha } = {}) {
       const repo = await allowedRepository(installationId, repositoryId);

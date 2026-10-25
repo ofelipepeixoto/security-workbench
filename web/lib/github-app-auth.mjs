@@ -6,6 +6,9 @@ const SECRET = /^[A-Za-z0-9_-]{43}$/;
 const TOKEN = /^ghu_[A-Za-z0-9_]{1,2048}$/;
 const HEADERS = { 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', 'X-Content-Type-Options': 'nosniff' };
 const encoder = new TextEncoder();
+// Internal, non-serializable proof of the exact credential generation used by
+// one consumer lease. Neither the token nor this record enters diagnostics.
+const executionProofs = new WeakMap();
 const base64url = bytes => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 const randomSecret = () => base64url(crypto.getRandomValues(new Uint8Array(32)));
 const digest = async value => base64url(new Uint8Array(await crypto.subtle.digest('SHA-256', encoder.encode(value))));
@@ -28,6 +31,16 @@ function configuration(input) {
   } catch { return null; }
 }
 export const isGitHubAppConfigured = config => configuration(config) !== null;
+
+export function connectionPersistenceFence(proof, job) {
+  const record = executionProofs.get(proof);
+  if (!record || record.ownerId !== job.owner_id || record.githubId !== job.github_id || record.jobId !== job.id || record.leaseToken !== job.lease_token || !Number.isSafeInteger(record.expiresAtMs)) throw new GitHubAppError('disconnected',401);
+  return {
+    sql:'EXISTS (SELECT 1 FROM workbench_github_app_connections c WHERE c.owner_id=? AND c.github_id=? AND c.token_envelope=? AND c.key_version=? AND c.config_key=? AND c.expires_at=? AND c.created_at=? AND c.updated_at=?)',
+    values:[record.ownerId,record.githubId,record.envelope,record.keyVersion,record.configKey,record.expiresAt,record.createdAt,record.updatedAt],
+    expiresAtMs:record.expiresAtMs,
+  };
+}
 
 function userIdentity(user) {
   if (user?.provider !== 'github' || typeof user.userId !== 'string' || !user.userId || user.userId.length > 200 || !/^[1-9][0-9]*$/.test(user.githubId ?? '') || !Number.isSafeInteger(Number(user.githubId))) throw new GitHubAppError('disconnected', 401);
@@ -154,6 +167,31 @@ export function createGitHubAppAuth({ config, db, getUser, fetcher = fetch, now 
         const { token } = await readToken(user);
         return createGitHubAppClient({ accessToken: token, expectedGitHubId: user.githubId, appId: settings.appId, fetcher, now, signal });
       } catch (error) { if (error instanceof GitHubAppError) throw error; throw new GitHubAppError('unavailable'); }
+    },
+    createExecutionContext(user, { signal, jobId, leaseToken } = {}) {
+      // One context belongs to one consumer attempt. It does not outlive that
+      // attempt or share positive access grants across requests or identities.
+      const identity = { ...userIdentity(user) };
+      let client, credential, proof;
+      return { persistenceProof() {
+        if (!proof || typeof jobId !== 'string' || !jobId || typeof leaseToken !== 'string' || !leaseToken) throw new GitHubAppError('disconnected',401);
+        return proof;
+      }, async getClient() {
+        try {
+          const current = await readToken(identity);
+          const binding = JSON.stringify([current.token, current.row.token_envelope, current.row.expires_at, current.row.key_version, current.row.config_key, current.row.created_at, current.row.updated_at]);
+          if (client && binding !== credential) throw new GitHubAppError('disconnected', 401);
+          if (!client) {
+            credential = binding;
+            client = createGitHubAppClient({accessToken:current.token,expectedGitHubId:identity.githubId,appId:settings.appId,fetcher,now,signal});
+            proof=Object.freeze({});
+            executionProofs.set(proof,{ownerId:identity.userId,githubId:identity.githubId,jobId,leaseToken,
+              envelope:current.row.token_envelope,keyVersion:current.row.key_version,configKey:current.row.config_key,
+              expiresAt:current.row.expires_at,expiresAtMs:current.row.expires_at*1000,createdAt:current.row.created_at,updatedAt:current.row.updated_at});
+          }
+          return client;
+        } catch (error) { if (error instanceof GitHubAppError) throw error; throw new GitHubAppError('unavailable'); }
+      }};
     },
     async start(request) {
       try {

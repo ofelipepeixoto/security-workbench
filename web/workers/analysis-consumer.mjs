@@ -3,6 +3,7 @@
  * required. No native REA, target execution, package install or credentials in jobs.
  */
 import {createGitHubAppAuth} from '../lib/github-app-auth.mjs';
+import {GitHubAppError} from '../lib/github-app-client.mjs';
 import {resolveWorkspacePrincipal} from '../lib/github-auth.mjs';
 import {createAnalysisJobs, recoverAnalysisJobs, AnalysisJobError} from '../lib/analysis-jobs.mjs';
 import {inspectGitHubApp} from '../lib/scanner.mjs';
@@ -18,7 +19,7 @@ function appConfig(env) {
     appId:env.GITHUB_APP_ID,slug:env.GITHUB_APP_SLUG,clientId:env.GITHUB_APP_CLIENT_ID,clientSecret:env.GITHUB_APP_CLIENT_SECRET,
     encryptionKey:env.GITHUB_APP_TOKEN_KEY,keyVersion:env.GITHUB_APP_KEY_VERSION||'1'};
 }
-export function createAnalysisConsumer({env,fetcher=fetch,now=()=>new Date(),appAuthFactory=createGitHubAppAuth}={}) {
+export function createAnalysisConsumer({env,fetcher=fetch,now=()=>new Date(),appAuthFactory=createGitHubAppAuth,observe}={}) {
   const qaGuard=createQaGuard({env,now});
   const active=()=>env?.WORKBENCH_JOBS_ENABLED==='true'&&env.WORKBENCH_MULTIUSER_ENABLED==='true'&&env.GITHUB_APP_ENABLED==='true'&&env.DB?.batch;
   async function process(jobId) {
@@ -28,21 +29,53 @@ export function createAnalysisConsumer({env,fetcher=fetch,now=()=>new Date(),app
     if(!row) return null;
     const window=qaGuard?await qaGuard.checkJob(row):null;
     const principal=resolveWorkspacePrincipal(policy(env),row.github_id);
-    const transport=window?qaFetchBudget(fetcher,{now,endsAt:window.ends_at}):fetcher;
+    let phase='authorization_initial',assertRunning;
+    const emit=event=>{if(event.phase)phase=event.phase;try{observe?.({...event,phase});}catch{/* diagnostic callbacks cannot affect work */}};
+    const guardedTransport=async(input,init)=>{await assertRunning?.();return fetcher(input,init);};
+    const transport=window?qaFetchBudget(fetcher,{now,endsAt:window.ends_at,observe:emit,beforeRequest:()=>assertRunning?.()}):guardedTransport;
     const app=appAuthFactory({config:appConfig(env),db:env.DB,fetcher:transport,now});
     if(!app.enabled) throw new AnalysisJobError('worker_unavailable');
     const user=principal?{...principal,provider:'github'}:null;
     const allowed=principal?.userId===row.owner_id;
-    const authorize=async(job,{signal})=>{
-      if(!allowed) return false;
-      const client=await app.getClient(user,{signal});
-      const access=await client.authorizeRepository({installationId:job.installation_id,repositoryId:job.repository_id,revision:job.revision});
-      // A rename/transfer requires a new explicit selection, preserving history.
-      return access.repository.id===job.repository_id&&access.repository.full_name===job.repo&&access.revision===job.revision;
+    let execution,initialAuthorization,initialRepository,checks=0;
+    const getClient=async(signal,job)=>{
+      if(typeof app.createExecutionContext==='function') {
+        execution??=app.createExecutionContext(user,{signal,jobId:job.id,leaseToken:job.lease_token});
+        return execution.getClient();
+      }
+      return app.getClient(user,{signal});
     };
-    return createAnalysisJobs({db:env.DB,ownerId:row.owner_id,githubId:row.github_id,now,authorize,qaGuard,
+    const authorize=async(job,{signal,assertActive})=>{
+      if(!allowed) return false;
+      assertRunning=assertActive;
+      emit({type:'phase',phase:checks===0?'authorization_initial':'authorization_final'});
+      const client=await getClient(signal,job),options={installationId:job.installation_id,repositoryId:job.repository_id,revision:job.revision};
+      let access;
+      if(checks===0&&typeof client.authorizeForAcquisition==='function') {
+        const prepared=await client.authorizeForAcquisition(options);
+        access=prepared.access;initialAuthorization=prepared.ticket;
+      } else access=await client.authorizeRepository(options);
+      if(checks===0)initialRepository={private:access.repository.private,visibility:access.repository.visibility};
+      checks++;
+      // A rename/transfer requires a new explicit selection, preserving history.
+      return access.repository.id===job.repository_id&&access.repository.full_name===job.repo&&access.revision===job.revision&&
+        access.repository.private===initialRepository.private&&access.repository.visibility===initialRepository.visibility;
+    };
+    return createAnalysisJobs({db:env.DB,ownerId:row.owner_id,githubId:row.github_id,now,authorize,qaGuard,observe:emit,
+      ...(typeof app.createExecutionContext==='function'?{persistenceProof:()=>execution?.persistenceProof()}:{}),
       ...(window?{timeoutMs:Math.max(1,Math.min(45000,window.ends_at-new Date(now()).valueOf()))}:{}),
-      analyze:async(job,{signal})=>inspectGitHubApp({client:await app.getClient(user,{signal}),installationId:job.installation_id,repositoryId:job.repository_id,revision:job.revision}),
+      analyze:async(job,{signal,assertActive})=>{
+        const client=await getClient(signal,job);
+        // Reserve the cost actually observed for this installation/repository
+        // pagination, twice: scanner exit and the job's final authorization.
+        const cost=window?client.authorizationRequestCost?.():0;
+        if(window&&(!Number.isSafeInteger(cost)||cost<3))throw new GitHubAppError('qa_consumption',403);
+        const reserved=cost*2;
+        return inspectGitHubApp({client,installationId:job.installation_id,repositoryId:job.repository_id,revision:job.revision,
+          initialAuthorization,revalidateConnection:()=>getClient(signal,job),checkpoint:assertActive,observe:emit,
+          ...(window?{acquisitionBudget:{reserved,canAcquire:()=>transport.canAcquire(reserved)}}:{}),
+        });
+      },
     }).process(jobId);
   }
   async function recover() {

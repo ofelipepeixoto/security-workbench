@@ -1,6 +1,7 @@
 /** D1 durable outbox. Only an explicitly configured trusted consumer runs work. */
 import { GitHubRateLimitError, GitHubAcquisitionTimeoutError } from './scanner.mjs';
 import { GitHubAppError } from './github-app-client.mjs';
+import { connectionPersistenceFence } from './github-app-auth.mjs';
 
 export const ANALYSIS_ENGINE_VERSION = 'workbench-static/1.1';
 export const ANALYSIS_JOB_LIMITS = Object.freeze({ attempts: 2, runningGlobal: 2, activePerOwner: 1, leaseMs: 60000, timeoutMs: 45000, resultBytes: 1024 * 1024 });
@@ -51,17 +52,20 @@ function projection(result, job) {
   stored.omissions = result.omissions;
   stored.limits = pick(result.limits ?? {}, ['files', 'bytes', 'fileBytes', 'responseBytes', 'deadlineMs', 'findings', 'dependencies']);
   stored.coverage = pick(result.coverage ?? {}, ['policy', 'exclusions_by_reason', 'files_excluded', 'dependency_analysis', 'advisory_coverage']);
+  if (result.coverage?.acquisition_budget) stored.coverage.acquisition_budget = pick(result.coverage.acquisition_budget,['requests_limit','requests_reserved','omitted_files']);
   const json = JSON.stringify(stored);
   if (new TextEncoder().encode(json).length > ANALYSIS_JOB_LIMITS.resultBytes) throw new AnalysisJobError('invalid_result', 502);
   return json;
 }
 
 export function createAnalysisJobs({ db, ownerId, githubId, now = () => new Date(), uuid = () => crypto.randomUUID(),
-  authorize, analyze, qaGuard, random = Math.random, leaseMs = ANALYSIS_JOB_LIMITS.leaseMs, timeoutMs = ANALYSIS_JOB_LIMITS.timeoutMs } = {}) {
+  authorize, analyze, qaGuard, observe, persistenceProof, random = Math.random, leaseMs = ANALYSIS_JOB_LIMITS.leaseMs, timeoutMs = ANALYSIS_JOB_LIMITS.timeoutMs } = {}) {
   if (!db?.prepare || !db?.batch) throw new AnalysisJobError();
+  if (persistenceProof !== undefined && typeof persistenceProof !== 'function') throw invalid();
   if (typeof ownerId !== 'string' || !ownerId || ownerId.length > 200) throw invalid();
   if (!Number.isInteger(leaseMs) || leaseMs < 1000 || leaseMs > 90000 || !Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 45000 || leaseMs <= timeoutMs) throw invalid();
   const current = () => { const value = new Date(now()).valueOf(); if (!Number.isFinite(value)) throw new AnalysisJobError(); return value; };
+  const emit = event => { try { observe?.(event); } catch { /* optional sanitized diagnostics */ } };
   const first = async (sql, ...values) => { try { return await db.prepare(sql).bind(...values).first(); } catch { throw new AnalysisJobError(); } };
   const batch = async statements => {
     try { const results = await db.batch(statements); if (!Array.isArray(results) || results.some(result => result.success !== true)) throw Error(); return results; }
@@ -112,14 +116,43 @@ export function createAnalysisJobs({ db, ownerId, githubId, now = () => new Date
   async function finish(job, status, failureCode, json = null, retryAt = null) {
     const updated = new Date(current()).toISOString();
     const at = current();
-    // Keep the final QA window check inside the same D1 transaction as both
-    // result writes, closing the race with an operator's early shutdown.
-    const qaFence = qaGuard && status === 'complete' ? ` AND EXISTS (SELECT 1 FROM workbench_qa_window WHERE id=1 AND closed_at IS NULL AND starts_at<=${at} AND ends_at>${at})` : '';
-    const fence = "EXISTS (SELECT 1 FROM workbench_analysis_jobs j WHERE j.owner_id=? AND j.id=? AND j.status='running' AND j.lease_token=? AND j.lease_expires_at>?)" + qaFence;
-    const statements = retryAt ? [] : [stmt(`UPDATE workbench_runs SET status=?,failure_code=?,result_json=?,updated_at=? WHERE owner_id=? AND id=? AND status='running' AND ${fence}`, status === 'complete' ? 'complete' : 'failed', failureCode, json, updated, ownerId, job.run_id, ownerId, job.id, job.lease_token, updated)];
-    statements.push(stmt("UPDATE workbench_analysis_jobs SET status=?,failure_code=?,available_at=COALESCE(?,available_at),retry_at=?,lease_token=NULL,lease_expires_at=NULL,updated_at=? WHERE owner_id=? AND id=? AND status='running' AND lease_token=? AND lease_expires_at>?" + qaFence, status, failureCode, retryAt, retryAt, updated, ownerId, job.id, job.lease_token, updated));
-    await batch(statements);
-    return get(job.id);
+    // Advance the application's claim clock by elapsed DATABASE time as well.
+    // Neither a stale pre-batch timestamp nor a frozen application clock can
+    // extend the deadline, lease or QA window during a delayed result mutation.
+    const leaseAt = 'CAST(round((julianday(j.lease_expires_at)-2440587.5)*86400000) AS INTEGER)';
+    const elapsed = "max(0,CAST(round((julianday('now')-julianday(j.updated_at))*86400000) AS INTEGER))";
+    const effectiveAt = `max(${at},${leaseAt}-${leaseMs}+${elapsed})`;
+    const qaFence = qaGuard && status === 'complete' ? ` AND EXISTS (SELECT 1 FROM workbench_qa_window w WHERE w.id=1 AND w.closed_at IS NULL AND w.starts_at<=${effectiveAt} AND w.ends_at>${effectiveAt})` : '';
+    const scopeFence = status === 'complete' ? " AND EXISTS (SELECT 1 FROM workbench_projects p WHERE p.owner_id=j.owner_id AND p.id=j.project_id AND p.repo=j.repo AND p.repository_id=j.repository_id AND p.installation_id=j.installation_id AND p.source='github-app' AND p.revoked_at IS NULL)" : '';
+    // The real App consumer supplies an opaque proof bound to this exact lease.
+    // Generic local job tests may inject a trusted authorization adapter instead.
+    // Encrypted credential-generation bindings stay private to this SQL call.
+    const connection = status === 'complete' && persistenceProof !== undefined ? connectionPersistenceFence(persistenceProof(),job) : null;
+    const connectionFence = connection ? ` AND ${connection.sql} AND ${effectiveAt}<${connection.expiresAtMs}` : '';
+    const generationValues = connection?.values ?? [];
+    // The result mutation itself checks elapsed database time. A delayed batch
+    // must not turn an already expired acquisition into a persisted result.
+    // updated_at is the database-clock claim stamp while this lease is running.
+    const deadlineFence = status === 'complete' ? ` AND ${effectiveAt}<${leaseAt}-${leaseMs}+${timeoutMs} AND ${effectiveAt}<${leaseAt}` : '';
+    const fence = "EXISTS (SELECT 1 FROM workbench_analysis_jobs j WHERE j.owner_id=? AND j.id=? AND j.status='running' AND j.lease_token=? AND j.lease_expires_at>?" + deadlineFence + qaFence + scopeFence + connectionFence + ')';
+    const statements = retryAt ? [] : [stmt(`UPDATE workbench_runs SET status=?,failure_code=?,result_json=?,updated_at=? WHERE owner_id=? AND id=? AND status='running' AND ${fence}`, status === 'complete' ? 'complete' : 'failed', failureCode, json, updated, ownerId, job.run_id, ownerId, job.id, job.lease_token, updated,...generationValues)];
+    // D1 batch statements are sequential in one SQL transaction. changes()
+    // refers to the immediately preceding result UPDATE (excluding triggers),
+    // so job completion cannot outpace a denied result or split the two states
+    // when the deadline passes between the statements. Keep them adjacent.
+    statements.push(stmt("UPDATE workbench_analysis_jobs SET status=?,failure_code=?,available_at=COALESCE(?,available_at),retry_at=?,lease_token=NULL,lease_expires_at=NULL,updated_at=? WHERE owner_id=? AND id=? AND status='running' AND lease_token=? AND lease_expires_at>?" + (status === 'complete' ? ' AND changes()=1' : ''), status, failureCode, retryAt, retryAt, updated, ownerId, job.id, job.lease_token, updated));
+    const results = await batch(statements);
+    if (status === 'complete' && results[0].meta?.changes !== 1) {
+      const active = await first(`SELECT j.*,CASE WHEN ${effectiveAt}<${leaseAt}-${leaseMs}+${timeoutMs} THEN 0 ELSE 1 END AS deadline_expired,CASE WHEN 1=1${qaFence} THEN 0 ELSE 1 END AS qa_expired,CASE WHEN 1=1${scopeFence}${connectionFence} THEN 0 ELSE 1 END AS access_revoked FROM workbench_analysis_jobs j WHERE j.owner_id=? AND j.id=?`,...generationValues,ownerId,job.id);
+      if (active?.status === 'running' && active.lease_token === job.lease_token) {
+        if (active.qa_expired === 1) throw new AnalysisJobError('qa_closed',403);
+        if (active.deadline_expired === 1) throw new AnalysisJobError('acquisition_timeout',504);
+        if (active.access_revoked === 1) throw new AnalysisJobError('access_revoked',403);
+      }
+    }
+    const result = await get(job.id);
+    emit({type:'finish',phase:'finished',status:result.job.status,code:result.job.failure_code});
+    return result;
   }
   async function process(jobId) {
     if (typeof authorize !== 'function' || typeof analyze !== 'function') throw new AnalysisJobError('worker_unavailable', 503);
@@ -136,42 +169,63 @@ export function createAnalysisJobs({ db, ownerId, githubId, now = () => new Date
       return get(previous.id);
     }
     const lease = id(uuid()), expires = new Date(startedMs + leaseMs).toISOString();
-    const claimed = await batch([stmt(`UPDATE workbench_analysis_jobs SET status='running',lease_token=?,lease_expires_at=?,attempts=attempts+1,retry_at=NULL,updated_at=?
+    const claimed = await batch([stmt(`UPDATE workbench_analysis_jobs SET status='running',lease_token=?,lease_expires_at=?,attempts=attempts+1,retry_at=NULL,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
       WHERE owner_id=? AND id=? AND attempts<2 AND ((status='queued' AND available_at<=?) OR (status='running' AND lease_expires_at<=?))
       AND (SELECT COUNT(*) FROM workbench_analysis_jobs WHERE status IN ('running','cancelled') AND lease_expires_at>?)<2
-      AND NOT EXISTS (SELECT 1 FROM workbench_analysis_jobs WHERE owner_id=? AND id<>? AND status IN ('running','cancelled') AND lease_expires_at>?)`, lease, expires, started, ownerId, previous.id, started, started, started, ownerId, previous.id, started)]);
+      AND NOT EXISTS (SELECT 1 FROM workbench_analysis_jobs WHERE owner_id=? AND id<>? AND status IN ('running','cancelled') AND lease_expires_at>?)`, lease, expires, ownerId, previous.id, started, started, started, ownerId, previous.id, started)]);
     if (claimed[0].meta?.changes !== 1) return get(previous.id);
     const job = await row(previous.id), controller = new AbortController();
     if (job.status !== 'running' || job.lease_token !== lease) return get(previous.id);
     let timer;
-    const verify = async () => {
-      const live = () => { if (controller.signal.aborted) throw new AnalysisJobError('acquisition_timeout', 504); };
+    const live = () => {
+      if (controller.signal.aborted) throw controller.signal.reason instanceof GitHubAppError ? controller.signal.reason : new AnalysisJobError('acquisition_timeout',504);
+    };
+    const assertActive = async () => {
       live();
+      // One query per gate, including QA shutdown. Do not double the D1 query
+      // budget for each GitHub page merely to check the same singleton window.
+      const active = qaGuard
+        ? await first('SELECT j.*,w.starts_at AS qa_starts_at,w.ends_at AS qa_ends_at,w.closed_at AS qa_closed_at FROM workbench_analysis_jobs j LEFT JOIN workbench_qa_window w ON w.id=1 WHERE j.owner_id=? AND j.id=?',ownerId,job.id)
+        : await row(job.id);
+      live();
+      if (!active || active.status !== 'running' || active.lease_token !== lease || Date.parse(active.lease_expires_at) <= current()) {
+        controller.abort(new GitHubAppError('cancelled',409));
+        throw controller.signal.reason;
+      }
+      const at = current();
+      if (qaGuard && (active.qa_closed_at !== null || !Number.isSafeInteger(active.qa_starts_at) || !Number.isSafeInteger(active.qa_ends_at) || active.qa_ends_at-active.qa_starts_at !== 604800000 || at < active.qa_starts_at || at >= active.qa_ends_at)) {
+        controller.abort(new GitHubAppError('qa_closed',403));
+        throw controller.signal.reason;
+      }
+    };
+    const verify = async () => {
+      await assertActive();
       if (qaGuard) await qaGuard.checkJob(job);
       const scope = await first('SELECT * FROM workbench_projects WHERE owner_id=? AND id=?', ownerId, job.project_id);
       live();
       if (!scope || scope.revoked_at || scope.repo !== job.repo || scope.repository_id !== job.repository_id || scope.installation_id !== job.installation_id) throw new AnalysisJobError('access_revoked', 403);
-      const allowed = await authorize(job, { signal: controller.signal });
+      const allowed = await authorize(job, { signal: controller.signal, assertActive });
       live();
       if (allowed !== true) throw new AnalysisJobError('access_revoked', 403);
-      const active = await row(job.id);
-      live();
-      if (active.status !== 'running' || active.lease_token !== lease) throw new AnalysisJobError('cancelled', 409);
+      await assertActive();
     };
     try {
       const result = await Promise.race([
         (async () => {
           await verify();
-          const value = await analyze(job, { signal: controller.signal });
+          const value = await analyze(job, { signal: controller.signal, assertActive });
           await verify();
           return projection(value, job);
         })(),
         new Promise((_, reject) => { timer = setTimeout(() => { controller.abort(); reject(new AnalysisJobError('acquisition_timeout', 504)); }, timeoutMs); }),
       ]);
+      live();
       return await finish(job, 'complete', null, result);
     } catch (error) {
       if (error instanceof AnalysisJobError && error.code === 'storage_unavailable') throw error;
-      const code = error instanceof GitHubRateLimitError || (error instanceof GitHubAppError && error.code === 'rate_limited') ? 'github_rate_limited' :
+      if (error instanceof GitHubAppError || error instanceof AnalysisJobError) emit({type:'error',code:error.code,status:error.status});
+      const code = error instanceof GitHubAppError && ['qa_consumption','qa_closed','cancelled'].includes(error.code) ? error.code :
+        error instanceof GitHubRateLimitError || (error instanceof GitHubAppError && error.code === 'rate_limited') ? 'github_rate_limited' :
         error instanceof GitHubAcquisitionTimeoutError || (error instanceof GitHubAppError && error.code === 'timeout') ? 'acquisition_timeout' :
         error instanceof GitHubAppError && ['forbidden', 'disconnected', 'suspended', 'insufficient_permission'].includes(error.code) ? 'access_revoked' :
         error instanceof AnalysisJobError ? error.code : 'acquisition_failed';
@@ -181,6 +235,7 @@ export function createAnalysisJobs({ db, ownerId, githubId, now = () => new Date
       // Never retry before a valid provider Retry-After/reset, even beyond a
       // queue transport's delay limit; the durable row waits for recovery.
       const retryAt = transient && job.attempts < 2 ? new Date(Math.max(backoff, Number.isFinite(suggested) ? suggested : 0)).toISOString() : null;
+      emit({type:retryAt?'retry':'failure',code,status:retryAt?'queued':'failed'});
       return finish(job, retryAt ? 'queued' : 'failed', code, null, retryAt);
     } finally { clearTimeout(timer); }
   }

@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { headers } from "next/headers";
 import { resolveWorkbenchIdentity } from "../lib/workbench-access.mjs";
 import { createGitHubAuth, isGitHubLoginConfigured } from "../lib/github-auth.mjs";
+import { publicGitHubSession } from "../lib/github-session-response.mjs";
 
 export function githubConfig() {
   return {
@@ -25,6 +26,10 @@ export async function getWorkbenchAccess(request?: Request) {
   const config = githubConfig();
   const githubReady = isGitHubLoginConfigured(config);
   const source = request ?? new Request(githubReady ? config.origin : "https://unconfigured.invalid", { headers: { cookie: githubReady ? (await headers()).get("cookie") || "" : "" } });
-  const user = await resolveWorkbenchIdentity({ config, request: source, getGitHubSession: (source: Request) => githubAuth().getSession(source) });
-  return { user, provider: user ? "github" as const : "anonymous" as const, githubReady };
+  let unavailable = false;
+  const user = await resolveWorkbenchIdentity({ config, request: source, getGitHubSession: async (source: Request) => {
+    try { return await githubAuth().getSession(source, { throwOnUnavailable: true }); }
+    catch { unavailable = true; throw new Error("session_unavailable"); }
+  } });
+  return { user, provider: user ? "github" as const : "anonymous" as const, githubReady, session: publicGitHubSession(user, Date.now(), unavailable) };
 }

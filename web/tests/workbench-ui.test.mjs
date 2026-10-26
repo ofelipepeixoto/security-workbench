@@ -31,7 +31,7 @@ try {
   }
   await mkdir(join(output, 'lib'), { recursive: true });
   await copyFile(join(webRoot, 'lib/rea-import-attempt.mjs'), join(output, 'lib/rea-import-attempt.mjs'));
-  for (const file of ['github-session-monitor.mjs', 'workbench-request-scope.mjs']) await copyFile(join(webRoot, 'lib', file), join(output, 'lib', file));
+  for (const file of ['correction-prompt.mjs', 'github-session-monitor.mjs', 'workbench-request-scope.mjs']) await copyFile(join(webRoot, 'lib', file), join(output, 'lib', file));
   const components = await import(pathToFileURL(join(output, 'app/workbench.mjs')).href);
   Workbench = components.default; WorkbenchListState = components.WorkbenchListState; RunMetadata = components.RunMetadata; RunEvidenceDetails = components.RunEvidenceDetails; RunOutcome = components.RunOutcome; RunCoverage = components.RunCoverage;
   RunsTable = components.RunsTable;

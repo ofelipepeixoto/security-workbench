@@ -1,10 +1,10 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { GitHubCatalog, isCatalogJobActive } from "./github-catalog";
-import type { CatalogFilters, CatalogInstallation, CatalogJob, CatalogPage, CatalogRepository, CatalogSelection, CatalogStatus } from "./workbench-types";
+import { GitHubCatalog, catalogRepositoryCanAnalyze, isCatalogJobActive } from "./github-catalog";
+import type { CatalogCoverage, CatalogInstallationCoverage, CatalogFilters, CatalogInstallation, CatalogJob, CatalogPage, CatalogRepository, CatalogSelection, CatalogStatus } from "./workbench-types";
 
 export type CatalogCall = <T>(payload: object, signal?: AbortSignal, endpoint?: string) => Promise<T>;
-export type CatalogPageResponse<T> = { total_count: number; page: number; next_page: number | null; complete: boolean; synced_at: string } & T;
+export type CatalogPageResponse<T> = { total_count: number; page: number; next_page: number | null; complete: boolean; synced_at: string; coverage?: CatalogCoverage | CatalogInstallationCoverage; page_limit?: number; limit_reached?: boolean } & T;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHA = /^[0-9a-f]{40}$/i;
 const pollingDelays = [1500, 3000, 6000, 10000, 15000, 20000];
@@ -13,7 +13,7 @@ export function catalogFailureScope(status?: number, code?: string) {
   if (status === 401) return ["disconnected", "not_connected", "expired", "revoked"].includes(code || "") ? "app_connection" : "login_session";
   return status === 403 ? "object_access" : "other";
 }
-export function emptyCatalogPage<T>(): CatalogPage<T> { return { items: [], state: "idle", page: 0, nextPage: null, complete: false, syncedAt: null }; }
+export function emptyCatalogPage<T>(): CatalogPage<T> { return { items: [], state: "idle", page: 0, nextPage: null, complete: false, syncedAt: null, totalCount: null, coverage: null, pageLimit: null, limitReached: false }; }
 
 /** Each account/refresh/installation change invalidates every earlier response,
  * including transports that finish after AbortSignal has been ignored. */
@@ -47,19 +47,25 @@ export function createCatalogRequestScope(captureAccess?: () => () => boolean) {
 }
 type CatalogRequest = ReturnType<ReturnType<typeof createCatalogRequestScope>["begin"]>;
 
-export function validateCatalogPage<T extends { id: number }>(items: T[], response: CatalogPageResponse<object>, requestedPage: number) {
+export function validateCatalogPage<T extends { id: number }>(items: T[], response: CatalogPageResponse<object>, requestedPage: number, collection?: "installations" | "repositories") {
   if (!Array.isArray(items) || items.some(item => !Number.isSafeInteger(item?.id) || item.id < 1) ||
     response.page !== requestedPage || !Number.isSafeInteger(requestedPage) || requestedPage < 1 ||
     !Number.isSafeInteger(response.total_count) || response.total_count < 0 ||
     (response.next_page !== null && response.next_page !== requestedPage + 1) ||
-    response.complete !== (response.next_page === null) || !Number.isFinite(Date.parse(response.synced_at))) {
+    response.complete !== (response.next_page === null) || !Number.isFinite(Date.parse(response.synced_at)) ||
+    (response.page_limit !== undefined && (!Number.isSafeInteger(response.page_limit) || response.page_limit < 1 || requestedPage > response.page_limit)) ||
+    (response.limit_reached !== undefined && typeof response.limit_reached !== "boolean") ||
+    (response.limit_reached === true && (response.next_page === null || response.complete)) ||
+    (response.page_limit !== undefined && response.next_page !== null && requestedPage >= response.page_limit && response.limit_reached !== true) ||
+    (response.coverage !== undefined && collection !== undefined && response.coverage.scope !== (collection === "installations" ? "user_app_installations" : "installation_user_intersection")) ||
+    (response.coverage !== undefined && (response.coverage.global_complete !== false || (response.coverage.scope !== "user_app_installations" && (response.coverage.scope !== "installation_user_intersection" || !["all", "selected"].includes(response.coverage.repository_selection) || typeof response.coverage.contents_permission !== "boolean"))))) {
     throw new Error("A página do catálogo não pôde ser conferida. Retome a consulta; nenhuma análise foi solicitada.");
   }
 }
 export function mergeCatalogPage<T extends { id: number }>(previous: CatalogPage<T>, items: T[], response: CatalogPageResponse<object>): CatalogPage<T> {
   const unique = new Map((response.page > 1 ? previous.items : []).map(item => [item.id, item]));
   for (const item of items) unique.set(item.id, item);
-  return { items: [...unique.values()], state: "loaded", page: response.page, nextPage: response.next_page, complete: response.complete, syncedAt: response.synced_at };
+  return { items: [...unique.values()], state: "loaded", page: response.page, nextPage: response.next_page, complete: response.complete, syncedAt: response.synced_at, totalCount: response.total_count, coverage: response.coverage ?? null, pageLimit: response.page_limit ?? null, limitReached: response.limit_reached ?? false };
 }
 export function failedCatalogPage<T>(previous: CatalogPage<T>): CatalogPage<T> { return { ...previous, state: "error", complete: false }; }
 
@@ -100,7 +106,7 @@ export function GitHubCatalogController({ call, demo, sessionUnavailable, initia
     try {
       const result = await call<CatalogPageResponse<{ repositories: CatalogRepository[] }>>({ action: "catalog-repositories", installationId: id, page }, request.signal);
       if (!request.isCurrent() || currentInstallation.current !== id) return;
-      validateCatalogPage(result.repositories, result, page);
+      validateCatalogPage(result.repositories, result, page, "repositories");
       if (result.repositories.some(repository => repository.installation_id !== id)) throw new Error("A instalação dos repositórios retornados não foi confirmada. Atualize o catálogo.");
       setRepositories(previous => mergeCatalogPage(previous, result.repositories, result));
     } catch (cause) {
@@ -133,7 +139,7 @@ export function GitHubCatalogController({ call, demo, sessionUnavailable, initia
         try {
           const page = await call<CatalogPageResponse<{ installations: CatalogInstallation[] }>>({ action: "catalog-installations", page: 1 }, request.signal);
           if (!request.isCurrent()) return;
-          validateCatalogPage(page.installations, page, 1);
+          validateCatalogPage(page.installations, page, 1, "installations");
           setInstallations(previous => mergeCatalogPage(previous, page.installations, page));
           const first = page.installations.find(installation => !installation.suspended_at) || page.installations[0];
           if (first) { currentInstallation.current = first.id; setInstallationId(first.id); if (!first.suspended_at) await loadRepositories(first.id, 1, request); }
@@ -195,7 +201,7 @@ export function GitHubCatalogController({ call, demo, sessionUnavailable, initia
   function select(repository: CatalogRepository) {
     if (operation.current || !contextMatches || status?.connection.state !== "connected" || installations.state !== "loaded" || repositories.state !== "loaded") return;
     const listed = repositories.items.find(item => item.id === repository.id && item.full_name === repository.full_name && item.installation_id === currentInstallation.current);
-    if (!listed || listed.disabled || listed.permissions?.pull === false) return;
+    if (!listed || !catalogRepositoryCanAnalyze(listed)) return;
     selectionVersion.current += 1; requestAttempt.current = null;
     setSelection({ repository: listed, revisionInput: "", confirmed: false, prepared: null });
   }
@@ -225,21 +231,21 @@ export function GitHubCatalogController({ call, demo, sessionUnavailable, initia
     }),
     moreInstallations: () => void exclusive(async request => {
       const page = installations.nextPage ?? (installations.page === 0 ? 1 : null);
-      if (!page) return;
+      if (!page || installations.limitReached) return;
       setInstallations(previous => ({ ...previous, state: "loading" }));
       try {
         const result = await call<CatalogPageResponse<{ installations: CatalogInstallation[] }>>({ action: "catalog-installations", page }, request.signal);
         if (!request.isCurrent()) return;
-        validateCatalogPage(result.installations, result, page);
+        validateCatalogPage(result.installations, result, page, "installations");
         setInstallations(previous => mergeCatalogPage(previous, result.installations, result));
       } catch (cause) { if (request.isCurrent()) { invalidateSelection(); setInstallations(failedCatalogPage); throw cause; } }
     }),
     moreRepositories: () => {
       const page = repositories.nextPage ?? (repositories.page === 0 ? 1 : null);
-      if (installationId && page) void exclusive(request => loadRepositories(installationId, page, request));
+      if (installationId && page && !repositories.limitReached) void exclusive(request => loadRepositories(installationId, page, request));
     },
     prepare: () => void exclusive(async request => {
-      if (!selection || !installationId || selection.repository.installation_id !== installationId || repositories.state !== "loaded" || installations.state !== "loaded") return;
+      if (!selection || !installationId || selection.repository.installation_id !== installationId || repositories.state !== "loaded" || installations.state !== "loaded" || !catalogRepositoryCanAnalyze(selection.repository)) return;
       const version = selectionVersion.current, repositoryId = selection.repository.id;
       const revision = selection.revisionInput.trim();
       if (revision && !SHA.test(revision)) throw new Error("Informe o SHA completo de 40 caracteres ou deixe o campo vazio para fixar a branch padrão.");

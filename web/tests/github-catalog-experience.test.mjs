@@ -54,6 +54,81 @@ function model(changes = {}) {
   };
 }
 const renderCatalog = (value, embedded = false) => renderToStaticMarkup(React.createElement(GitHubCatalog, { model: value, actions, embedded }));
+
+test('real installation and repository coverage contracts are validated separately', () => {
+  const installationResponse = { ...pageResponse(1, null, 1), page_limit: 10, limit_reached: false,
+    total_scope: 'user_app_installations', coverage: { scope: 'user_app_installations', global_complete: false } };
+  assert.doesNotThrow(() => validateCatalogPage([installation(11, 'synthetic-account-a')], installationResponse, 1, 'installations'));
+  assert.throws(() => validateCatalogPage([repository(1)], installationResponse, 1, 'repositories'), /página do catálogo/);
+  const repositoryResponse = { ...pageResponse(1, null, 1), page_limit: 10, limit_reached: false,
+    coverage: { scope: 'installation_user_intersection', repository_selection: 'selected', global_complete: false, contents_permission: false } };
+  assert.doesNotThrow(() => validateCatalogPage([repository(1)], repositoryResponse, 1, 'repositories'));
+  assert.throws(() => validateCatalogPage([installation(11, 'synthetic-account-a')], repositoryResponse, 1, 'installations'), /página do catálogo/);
+  for (const patch of [{ global_complete: true }, { scope: 'all_user_repositories' }, { repository_selection: 'invented' }]) {
+    assert.throws(() => validateCatalogPage([repository(1)], { ...repositoryResponse, coverage: { ...repositoryResponse.coverage, ...patch } }, 1, 'repositories'), /página do catálogo/);
+  }
+});
+
+test('metadata discovery without code permission stays visible with a protected authorization path', () => {
+  const item = { ...repository(7), fork: true, archived: true, visibility: 'internal', analysis_access: { state: 'contents_permission_required', can_analyze: false, manage_url: 'https://github.com/settings/installations/11' } };
+  const repositories = mergeCatalogPage(emptyCatalogPage(), [item], { ...pageResponse(1, null, 1), coverage: { scope: 'installation_user_intersection', repository_selection: 'selected', global_complete: false, contents_permission: false } });
+  const html = renderCatalog(model({ repositories }));
+  assert.match(html, /synthetic-account-a\/fixture-7/);
+  assert.match(html, /Interno · Fork/);
+  assert.match(html, /Arquivado/);
+  assert.match(html, /leitura do código ainda não autorizada à App/);
+  assert.match(html, /<button class="button secondary" disabled="">Escolher repositório/);
+  assert.match(html, /href="https:\/\/github.com\/settings\/installations\/11"/);
+  assert.match(html, /Conferir autorização no GitHub/);
+  assert.match(html, /Cobertura parcial da conta GitHub/);
+  assert.match(html, /somente repositórios selecionados/);
+  assert.doesNotMatch(html, /Preparar análise de|Solicitar análise limitada/);
+});
+
+test('all selection explains future repositories without claiming global user coverage or consent', () => {
+  const repositories = mergeCatalogPage(emptyCatalogPage(), [repository(1)], { ...pageResponse(1, null, 1), coverage: { scope: 'installation_user_intersection', repository_selection: 'all', global_complete: false, contents_permission: true } });
+  const html = renderCatalog(model({ repositories }));
+  assert.match(html, /repositórios atuais e futuros dessa conta ou organização/);
+  assert.match(html, /Outras instalações, organizações, colaborações ou exigências de SSO podem continuar fora/);
+  assert.match(html, /Negar ou cancelar esse consentimento mantém a cobertura atual/);
+  assert.match(html, /1 informados pelo GitHub nesta interseção/);
+  assert.match(html, /não é um total global da conta GitHub/);
+  assert.doesNotMatch(html, /Todos os repositórios da conta carregados|Acesso a futuros repositórios autorizado automaticamente/);
+});
+
+test('page caps remain partial and cannot make the next cursor actionable', () => {
+  const response = { ...pageResponse(10, 11, 1100), page_limit: 10, limit_reached: true };
+  validateCatalogPage([repository(1000)], response, 10, 'repositories');
+  const repositories = mergeCatalogPage(emptyCatalogPage(), [repository(1000)], response);
+  const html = renderCatalog(model({ repositories }));
+  assert.match(html, /Limite desta consulta atingido/);
+  assert.match(html, /Até 10 páginas são permitidas por instalação/);
+  assert.match(html, /1100 informados pelo GitHub nesta interseção/);
+  assert.match(html, /<button class="button secondary" disabled="">Carregar próxima página/);
+  assert.match(html, /Sincronização incompleta/);
+  assert.throws(() => validateCatalogPage([repository(1000)], { ...response, limit_reached: false }, 10, 'repositories'), /página do catálogo/);
+});
+
+test('internal visibility filters do not merge private and internal repositories', () => {
+  const items = [repository(1), { ...repository(2), visibility: 'internal', archived: true, fork: true }, { ...repository(3), private: false, visibility: 'public' }];
+  const value = model({ repositories: mergeCatalogPage(emptyCatalogPage(), items, pageResponse(1, null, 3)), filters: { q: '', visibility: 'internal', archived: '', language: '' } });
+  const html = renderCatalog(value);
+  assert.match(html, /1 de 3 repositórios carregados/);
+  assert.match(html, /synthetic-account-a\/fixture-2/);
+  assert.doesNotMatch(html, /synthetic-account-a\/fixture-[13]/);
+});
+
+test('metadata discovery never expands the QA fixture policy or suggests GitHub consent can bypass it', () => {
+  const item = { ...repository(7), analysis_access: { state: 'available', can_analyze: true, qa_allowed: false, qa_reason: 'not_selected_fixture', manage_url: 'https://github.com/settings/installations/11' } };
+  const value = model({ repositories: mergeCatalogPage(emptyCatalogPage(), [item], pageResponse(1, null, 1)) });
+  value.status.analysis_policy = 'qa_selected_fixtures';
+  const html = renderCatalog(value);
+  assert.match(html, /somente fixtures previamente selecionadas podem ser analisadas/);
+  assert.match(html, /análise bloqueada pela seleção exclusiva de fixtures do QA/);
+  assert.match(html, /<button class="button secondary" disabled="">Escolher repositório/);
+  assert.doesNotMatch(html, /Conferir autorização no GitHub/);
+});
+
 function deferred() {
   let resolve, reject;
   const promise = new Promise((resolvePromise, rejectPromise) => { resolve = resolvePromise; reject = rejectPromise; });

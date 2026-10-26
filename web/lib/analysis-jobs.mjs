@@ -122,7 +122,7 @@ export function createAnalysisJobs({ db, ownerId, githubId, now = () => new Date
     const leaseAt = 'CAST(round((julianday(j.lease_expires_at)-2440587.5)*86400000) AS INTEGER)';
     const elapsed = "max(0,CAST(round((julianday('now')-julianday(j.updated_at))*86400000) AS INTEGER))";
     const effectiveAt = `max(${at},${leaseAt}-${leaseMs}+${elapsed})`;
-    const qaFence = qaGuard && status === 'complete' ? ` AND EXISTS (SELECT 1 FROM workbench_qa_window w WHERE w.id=1 AND w.closed_at IS NULL AND w.starts_at<=${effectiveAt} AND w.ends_at>${effectiveAt})` : '';
+    const qaFence = qaGuard && status === 'complete' ? ` AND EXISTS (SELECT 1 FROM workbench_qa_active_window w JOIN workbench_qa_reservations r ON r.job_id=j.id WHERE w.id=1 AND w.closed_at IS NULL AND r.owner_id=j.owner_id AND r.github_id=j.github_id AND r.repository_id=j.repository_id AND r.installation_id=j.installation_id AND r.repo=j.repo AND r.revision=j.revision AND r.created_at>=w.starts_at AND r.created_at<w.ends_at AND w.starts_at<=${effectiveAt} AND w.ends_at>${effectiveAt})` : '';
     const scopeFence = status === 'complete' ? " AND EXISTS (SELECT 1 FROM workbench_projects p WHERE p.owner_id=j.owner_id AND p.id=j.project_id AND p.repo=j.repo AND p.repository_id=j.repository_id AND p.installation_id=j.installation_id AND p.source='github-app' AND p.revoked_at IS NULL)" : '';
     // The real App consumer supplies an opaque proof bound to this exact lease.
     // Generic local job tests may inject a trusted authorization adapter instead.
@@ -185,7 +185,7 @@ export function createAnalysisJobs({ db, ownerId, githubId, now = () => new Date
       // One query per gate, including QA shutdown. Do not double the D1 query
       // budget for each GitHub page merely to check the same singleton window.
       const active = qaGuard
-        ? await first('SELECT j.*,w.starts_at AS qa_starts_at,w.ends_at AS qa_ends_at,w.closed_at AS qa_closed_at FROM workbench_analysis_jobs j LEFT JOIN workbench_qa_window w ON w.id=1 WHERE j.owner_id=? AND j.id=?',ownerId,job.id)
+        ? await first('SELECT j.*,w.starts_at AS qa_starts_at,w.ends_at AS qa_ends_at,w.closed_at AS qa_closed_at,w.mode AS qa_mode FROM workbench_analysis_jobs j LEFT JOIN workbench_qa_active_window w ON w.id=1 WHERE j.owner_id=? AND j.id=?',ownerId,job.id)
         : await row(job.id);
       live();
       if (!active || active.status !== 'running' || active.lease_token !== lease || Date.parse(active.lease_expires_at) <= current()) {
@@ -193,7 +193,7 @@ export function createAnalysisJobs({ db, ownerId, githubId, now = () => new Date
         throw controller.signal.reason;
       }
       const at = current();
-      if (qaGuard && (active.qa_closed_at !== null || !Number.isSafeInteger(active.qa_starts_at) || !Number.isSafeInteger(active.qa_ends_at) || active.qa_ends_at-active.qa_starts_at !== 604800000 || at < active.qa_starts_at || at >= active.qa_ends_at)) {
+      if (qaGuard && (active.qa_closed_at !== null || !Number.isSafeInteger(active.qa_starts_at) || !Number.isSafeInteger(active.qa_ends_at) || active.qa_ends_at-active.qa_starts_at !== (active.qa_mode==='canary'?900000:604800000) || at < active.qa_starts_at || at >= active.qa_ends_at)) {
         controller.abort(new GitHubAppError('qa_closed',403));
         throw controller.signal.reason;
       }

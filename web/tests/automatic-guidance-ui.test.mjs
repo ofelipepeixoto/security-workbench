@@ -35,9 +35,9 @@ test('automatic guidance needs no generation action and distinguishes rules, evi
   assert.match(html, /Orientação automática/);
   assert.match(html, /gerado sem revisão humana prévia/);
   assert.match(html, /Por regras · sem IA/);
-  assert.match(html, /Nenhum modelo de IA foi chamado/);
+  assert.match(html, /Esta orientação por regras não chama modelos de IA/);
   assert.match(html, /não aplica correções nem altera decisões humanas/);
-  assert.match(html, /Revisão contextual por modelo: não executada/);
+  assert.match(html, /Revisão contextual por modelo: camada separada/);
   assert.match(html, /não recebeu|Não recebeu/);
   assert.match(html, /static-guidance\/1\.0/);
   assert.match(html, /SWB-TEXT-001\/1/);
@@ -123,6 +123,6 @@ test('the real deterministic advisor output renders without invented context or 
   assert.match(html, /SWB-ADVISE-SECRET\/1/);
   assert.match(html, new RegExp('finding:' + 'e'.repeat(20)));
   assert.match(html, /1 com orientação por regra/);
-  assert.match(html, /Revisão contextual por modelo: não executada/);
+  assert.match(html, /Revisão contextual por modelo: camada separada/);
   assert.doesNotMatch(html, /<button|<form|Correção aplicada|Reclassificado/);
 });

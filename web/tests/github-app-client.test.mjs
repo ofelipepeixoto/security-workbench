@@ -68,12 +68,101 @@ test('installation IDs not in the authenticated user intersection never reach re
   assert.ok(f.calls.every(call => !call.url.includes('/repositories')));
 });
 
-test('suspended installations and missing content read permission fail closed', async () => {
+test('suspended installations and missing content read permission fail closed for execution', async () => {
   for (const [extra, code] of [[{ suspended_at: '2026-10-21T11:00:00Z' }, 'suspended'], [{ permissions: { metadata: 'read' } }, 'insufficient_permission']]) {
     const f = fixture(url => new URL(url).pathname === '/user/installations' ? json({ total_count: 1, installations: [installation(extra)] }) : null);
-    await assert.rejects(f.client.listRepositories({ installationId: 10 }), { code });
+    await assert.rejects(f.client.authorizeRepository({ installationId: 10, repositoryId: 300 }), { code });
     assert.ok(f.calls.every(call => !call.url.includes('/10/repositories')));
   }
+});
+
+test('metadata-only discovery remains visible while content analysis is explicitly denied', async () => {
+  const f = fixture(url => new URL(url).pathname === '/user/installations' ? json({ total_count: 1, installations: [installation({ permissions: { metadata: 'read' } })] }) : null);
+  const result = await f.client.listRepositories({ installationId: 10 });
+  assert.equal(result.repositories[0].full_name, 'fixture-owner/private-one');
+  assert.equal(result.repositories[0].analysis_access.state, 'contents_permission_required');
+  assert.equal(result.repositories[0].analysis_access.can_analyze, false);
+  assert.equal(result.repositories[0].analysis_access.manage_url, 'https://github.com/settings/installations/10');
+  assert.equal(result.coverage.repository_selection, 'selected');
+  assert.equal(result.coverage.global_complete, false);
+  assert.equal(result.coverage.contents_permission, false);
+  assert.equal(result.total_scope, 'installation_user_intersection');
+  assert.equal(result.total_count, 1);
+  await assert.rejects(f.client.authorizeRepository({ installationId: 10, repositoryId: 300 }), { code: 'insufficient_permission' });
+  assert.ok(f.calls.every(call => !/\/commits\/|\/git\//.test(call.url)));
+});
+
+test('all selection still describes only the user and installation intersection', async () => {
+  const f = fixture(url => new URL(url).pathname === '/user/installations' ? json({ total_count: 1, installations: [installation({ repository_selection: 'all' })] }) : null);
+  const result = await f.client.listRepositories({ installationId: 10 });
+  assert.equal(result.coverage.repository_selection, 'all');
+  assert.equal(result.coverage.global_complete, false);
+  assert.equal(result.coverage.scope, 'installation_user_intersection');
+  assert.equal(result.repositories[0].analysis_access.can_analyze, true);
+  assert.ok(f.calls.every(call => !call.url.includes('/commits/')));
+});
+
+test('catalog keeps internal repositories, forks and archived entries and deduplicates by repository ID', async () => {
+  const same = repository({ visibility: 'internal', fork: true, archived: true });
+  const f = fixture(url => new URL(url).pathname === '/user/installations/10/repositories' ? json({ total_count: 1, repositories: [same, same] }) : null);
+  const result = await f.client.listRepositories({ installationId: 10 });
+  assert.equal(result.repositories.length, 1);
+  assert.equal(result.repositories[0].visibility, 'internal');
+  assert.equal(result.repositories[0].fork, true);
+  assert.equal(result.repositories[0].archived, true);
+  assert.equal(result.repositories[0].analysis_access.can_analyze, true);
+});
+
+test('metadata does not grant read authority for disabled or unreadable repositories', async () => {
+  for (const [extra,state] of [[{disabled:true},'disabled'],[{permissions:{pull:false}},'repository_read_required']]) {
+    const f = fixture(url => new URL(url).pathname === '/user/installations/10/repositories' ? json({ total_count: 1, repositories: [repository(extra)] }) : null);
+    const result = await f.client.listRepositories({ installationId: 10 });
+    assert.equal(result.repositories[0].analysis_access.state,state);
+    assert.equal(result.repositories[0].analysis_access.can_analyze,false);
+    await assert.rejects(f.client.authorizeRepository({installationId:10,repositoryId:300}), {code:'forbidden'});
+    assert.ok(f.calls.every(call=>!call.url.includes('/commits/')));
+  }
+});
+
+test('catalog page ceiling is explicit without claiming a completed inventory', async () => {
+  const f = fixture(url => new URL(url).pathname === '/user/installations/10/repositories' ? json({ total_count: 500, repositories: [repository()] }) : null, {maxPages:1});
+  const result = await f.client.listRepositories({ installationId: 10 });
+  assert.equal(result.complete,false); assert.equal(result.limit_reached,true); assert.equal(result.page_limit,1); assert.equal(result.next_page,2);
+  const before = f.calls.length;
+  await assert.rejects(f.client.listRepositories({installationId:10,page:2}),{code:'incomplete'});
+  assert.equal(f.calls.length,before);
+});
+
+test('101 previously unanalyzed metadata entries and another installation are navigable without any commit request',async()=>{
+  const first=Array.from({length:101},(_,index)=>repository({id:1000+index,name:`new-${index}`,full_name:`fixture-owner/new-${index}`,fork:index===99,archived:index===100}));
+  const second=repository({id:9000,name:'collaboration',full_name:'fixture-org/collaboration',owner:{id:999,login:'fixture-org',type:'Organization'},visibility:'internal'});
+  const f=fixture(url=>{
+    const u=new URL(url),page=Number(u.searchParams.get('page')||1);
+    if(u.pathname==='/user/installations')return json({total_count:2,installations:[installation(),installation({id:11,account:{id:999,login:'fixture-org',type:'Organization'},repository_selection:'all'})]});
+    if(u.pathname==='/user/installations/10/repositories')return json({total_count:101,repositories:page===1?first.slice(0,100):first.slice(100)});
+    if(u.pathname==='/user/installations/11/repositories')return json({total_count:1,repositories:[second]});
+  });
+  const installations=await f.client.listInstallations();assert.deepEqual(installations.installations.map(item=>item.id),[10,11]);
+  const one=await f.client.listRepositories({installationId:10});assert.equal(one.repositories.length,100);assert.equal(one.next_page,2);assert.equal(one.complete,false);
+  const two=await f.client.listRepositories({installationId:10,page:one.next_page});assert.equal(two.repositories.length,1);assert.equal(two.complete,true);
+  assert.equal(new Set([...one.repositories,...two.repositories].map(item=>item.id)).size,101);
+  assert.equal(one.total_count,101);assert.equal(two.total_count,101);assert.equal(two.repositories[0].archived,true);
+  const org=await f.client.listRepositories({installationId:11});assert.equal(org.repositories[0].owner.type,'Organization');assert.equal(org.repositories[0].visibility,'internal');assert.equal(org.coverage.repository_selection,'all');assert.equal(org.coverage.global_complete,false);
+  assert.ok(f.calls.every(call=>!call.url.includes('/git/')&&!call.url.includes('/commits/')));
+});
+
+test('fresh catalog denial invalidates earlier content grants and cannot disclose a new account inventory', async () => {
+  let revoked=false;
+  const f=fixture(url=>revoked&&new URL(url).pathname==='/user/installations/10/repositories'?new Response(null,{status:403}):null);
+  await f.client.authorizeRepository({installationId:10,repositoryId:300,revision:REVISION});
+  const before=f.calls.filter(call=>call.url.includes('/git/')).length;
+  revoked=true;
+  await assert.rejects(f.client.listRepositories({installationId:10}),{code:'forbidden'});
+  await assert.rejects(f.client.readBlob({installationId:10,repositoryId:300,blobSha:BLOB}),{code:'forbidden'});
+  assert.equal(f.calls.filter(call=>call.url.includes('/git/')).length,before);
+  const b=fixture(url=>new URL(url).pathname==='/user'?json({id:202,login:'other-user'}):null);
+  await assert.rejects(b.client.listRepositories({installationId:10}),{code:'disconnected'});
+  assert.deepEqual(b.calls.map(call=>new URL(call.url).pathname),['/user']);
 });
 
 test('stable token identity and app ID are validated before grants', async () => {

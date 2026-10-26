@@ -92,7 +92,7 @@ export function AutomaticGuidance({ guidance, findingId }: { guidance?: Automati
     <div className="section-heading"><div><h2 id={id}>Orientação automática</h2><p>Complemento às evidências da análise, gerado sem revisão humana prévia.</p></div><span className="badge">Por regras · sem IA</span></div>
     <div className="automatic-guidance-body">
       <p>{guidance ? states[guidance.state] : states.unavailable}</p>
-      <p>Nenhum modelo de IA foi chamado. O orientador não aplica correções nem altera decisões humanas. Uma proposta de mudança precisa ser conferida no código autorizado.</p>
+      <p>Esta orientação por regras não chama modelos de IA. O orientador não aplica correções nem altera decisões humanas. Uma proposta de mudança precisa ser conferida no código autorizado.</p>
       {guidance && <>
         <dl className="automatic-guidance-meta">
           <div><dt>Origem da análise</dt><dd>{sources[guidance.context.source] || "Origem não reconhecida"}</dd></div>
@@ -105,7 +105,7 @@ export function AutomaticGuidance({ guidance, findingId }: { guidance?: Automati
         {guidance.summary.omitted > 0 && <p className="automatic-guidance-limits">{guidance.summary.omitted} candidatos não aparecem neste bloco por limite de orientação. O orientador considera até {guidance.limits.findings} candidatos; isso não significa ausência de outros problemas.</p>}
         {guidance.items.length > 0 && <details className="automatic-guidance-details"><summary>Conferir orientações, evidências e limites por candidato</summary><div>{guidance.items.map((item, index) => <GuidanceItem key={item.finding_id || index} item={item} />)}</div></details>}
       </>}
-      <p className="automatic-guidance-model"><strong>Revisão contextual por modelo: não executada.</strong> Depende de uma integração e de um modelo aprovados separadamente. Não faz parte desta orientação por regras.</p>
+      <p className="automatic-guidance-model"><strong>Revisão contextual por modelo: camada separada.</strong> Confira seu estado no painel próprio. Uma orientação por regras não comprova execução de modelo nem aprovação dessa integração.</p>
     </div>
   </section>;
 }

@@ -85,7 +85,7 @@ test('input work, JSON and Markdown are bounded for maximum supported/fallback c
 test('the real report contains automatic guidance with the same current decisions and proposed tests, without adding executable fences',()=>{
   const input=run({findings:[finding({status:'false_positive'})]}), before=structuredClone(input), markdown=renderReport(input);
   assert.ok(markdown.includes(renderReviewGuidanceMarkdown(input))); assert.ok(markdown.includes(REVIEW_ADVISOR_POLICY)); assert.match(markdown,/decision-recorded/);
-  assert.match(markdown,/gerada automaticamente, sem revisão humana prévia/); assert.match(markdown,/Nenhum modelo de IA foi chamado/); assert.match(markdown,/Verificação proposta \(não executada\)/);
+  assert.match(markdown,/gerada automaticamente, sem revisão humana prévia/); assert.match(markdown,/Esta camada por regras não chama modelos de IA/); assert.match(markdown,/camada separada/); assert.match(markdown,/Verificação proposta \(não executada\)/);
   assert.equal(markdown.split('```').length-1,2); assert.deepEqual(input,before);
 });
 

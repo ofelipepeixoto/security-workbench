@@ -328,7 +328,7 @@ export function renderReport(run) {
   for (const item of run.dependencies || []) lines.push(`- ${markdown(item.name)} ${markdown(item.version)} (${markdown(item.source)})`);
   if (run.omissions?.length) {lines.push("", "## Limitações de leitura", ""); for (const item of run.omissions) lines.push(`- ${markdown(item)}`);}
   lines.push("", "## Prompt portátil para revisão e proposta de correção", "",
-    `Contrato: ${CORRECTION_PROMPT_VERSION}. Copie o bloco abaixo junto com este relatório para uma IA de sua escolha somente depois de revisar o que deseja compartilhar. O Workbench apenas monta este texto; nenhuma IA é chamada. Não envie código privado ou dados sensíveis sem autorização.`, "",
+    `Contrato: ${CORRECTION_PROMPT_VERSION}. Copie o bloco abaixo junto com este relatório para uma IA de sua escolha somente depois de revisar o que deseja compartilhar. A montagem deste prompt não chama IA. A camada contextual possui estado e referências separados no painel próprio e não está incluída neste exportador. Não envie código privado ou dados sensíveis sem autorização.`, "",
     "```text", renderCorrectionPrompt(), "```", "",
     "Este relatório e o prompt não geram ou aplicam patches automaticamente. A proposta precisa de contexto atual, testes e revisão humana.");
   return lines.join("\n") + "\n";

@@ -43,7 +43,7 @@ test('real report preserves review states, provenance and omissions and includes
   assert.match(report,/confirmed registra uma confirmação humana, sem provar exploração/);
   assert.match(report,/sem análise de CVEs/);assert.match(report,/Ausência de achados não comprova segurança/);
   assert.ok(report.includes(`\`\`\`text\n${renderCorrectionPrompt()}\n\`\`\``));
-  assert.match(report,/nenhuma IA é chamada/);assert.match(report,/não geram ou aplicam patches automaticamente/);
+  assert.match(report,/A montagem deste prompt não chama IA/);assert.match(report,/camada contextual possui estado e referências separados/);assert.match(report,/não geram ou aplicam patches automaticamente/);
 });
 
 test('untrusted report fields cannot replace the instruction block or introduce raw Markdown actions',()=>{

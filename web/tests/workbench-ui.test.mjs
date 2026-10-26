@@ -11,7 +11,7 @@ import ts from 'typescript';
 // Effects and browser interactions require the separate runtime/browser checks.
 const webRoot = fileURLToPath(new URL('../', import.meta.url));
 const output = await mkdtemp(join(webRoot, '.ui-render-'));
-const files = ['app/workbench.tsx', 'app/access-panel.tsx', 'components/operational-info.tsx', 'components/demo-workbench.ts', 'components/github-catalog.tsx', 'components/github-catalog-controller.tsx', 'components/github-session-status.tsx', 'components/automatic-guidance.tsx'];
+const files = ['app/workbench.tsx', 'app/access-panel.tsx', 'components/operational-info.tsx', 'components/demo-workbench.ts', 'components/github-catalog.tsx', 'components/github-catalog-controller.tsx', 'components/github-session-status.tsx', 'components/automatic-guidance.tsx', 'components/contextual-review.tsx'];
 let Workbench, WorkbenchListState, RunMetadata, RunEvidenceDetails, RunOutcome, RunCoverage, RunsTable, GitHubCatalog, CatalogJobStatus, filterCatalogRepositories, catalogFailureScope;
 try {
   for (const file of files) {
@@ -31,7 +31,7 @@ try {
   }
   await mkdir(join(output, 'lib'), { recursive: true });
   await copyFile(join(webRoot, 'lib/rea-import-attempt.mjs'), join(output, 'lib/rea-import-attempt.mjs'));
-  for (const file of ['correction-prompt.mjs', 'github-session-monitor.mjs', 'workbench-request-scope.mjs', 'review-advisor.mjs']) await copyFile(join(webRoot, 'lib', file), join(output, 'lib', file));
+  for (const file of ['correction-prompt.mjs', 'github-session-monitor.mjs', 'workbench-request-scope.mjs', 'review-advisor.mjs', 'contextual-review-request.mjs']) await copyFile(join(webRoot, 'lib', file), join(output, 'lib', file));
   const components = await import(pathToFileURL(join(output, 'app/workbench.mjs')).href);
   Workbench = components.default; WorkbenchListState = components.WorkbenchListState; RunMetadata = components.RunMetadata; RunEvidenceDetails = components.RunEvidenceDetails; RunOutcome = components.RunOutcome; RunCoverage = components.RunCoverage;
   RunsTable = components.RunsTable;

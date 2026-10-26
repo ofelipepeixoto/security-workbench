@@ -13,6 +13,7 @@ const metadata = user => ({id:user === A ? 101 : 202, name:user === A ? 'private
 
 function provider(user, state = {}) {
   const repo = metadata(user);
+  if (state.visibility) repo.visibility = state.visibility;
   return {enabled:true,
     async getConnection() { return {state:state.revoked ? 'revoked' : 'connected', validated_at:'2026-10-22T01:30:00Z'}; },
     async getClient() {
@@ -71,6 +72,46 @@ test('catalog is a distinct authorized inventory; selecting a pinned commit neve
     assert.equal(wrong.status,403);
     for(const action of ['inspect','authorize','scan']) assert.equal((await api(db,B,{action,repo:'ofelipepeixoto/rea',projectId:b.id,requestId:crypto.randomUUID()})).status,403);
   }finally{db.close();}
+});
+
+test('internal visibility comes from fresh authorized metadata without widening the stored non-public scope',async()=>{
+  const db=migratedDatabase();
+  try {
+    const app=provider(B,{visibility:'internal'});
+    const selected=await select(db,B,{githubApp:app});
+    assert.equal(selected.visibility,'internal');
+    assert.equal(db.sql.prepare('SELECT visibility FROM workbench_projects WHERE owner_id=? AND id=?').get(B.userId,selected.id).visibility,'private');
+    const result=await api(db,B,null,{githubApp:app});
+    assert.equal(result.status,200); assert.equal(result.body.projects[0].visibility,'internal');
+    const denied=await api(db,A,{action:'catalog-authorize',installationId:8,repositoryId:202},{githubApp:provider(A)});
+    assert.equal(denied.status,403); assert.doesNotMatch(JSON.stringify(denied.body),/private-b|internal/);
+  } finally { db.close(); }
+});
+
+test('catalog applies one bounded QA policy snapshot without authorizing or persisting any discovered repository',async()=>{
+  const db=migratedDatabase();let policyCalls=0,authorizationCalls=0;
+  const rows=Array.from({length:100},(_,index)=>({...metadata(B),id:202+index,full_name:`synthetic-org/never-analyzed-${index}`,analysis_access:{state:'available',can_analyze:true,manage_url:'https://github.com/settings/installations/8'}}));
+  const app={enabled:true,async getClient(){return {
+    async listRepositories(){return {repositories:rows,total_count:101,page:1,next_page:2,complete:false};},
+    async authorizeRepository(){authorizationCalls++;throw Error('discovery must not authorize');},
+  };}};
+  const qaGuard={async catalogPolicies(scope){
+    policyCalls++;assert.equal(scope.ownerId,B.userId);assert.equal(scope.githubId,B.githubId);assert.equal(scope.repositories.length,100);
+    assert.deepEqual(scope.repositories[0],{repositoryId:202,installationId:8,repo:'synthetic-org/never-analyzed-0'});
+    return scope.repositories.map((_,index)=>({can_analyze:index===0,reason:index===0?null:'qa_fixture_only'}));
+  }};
+  try {
+    const result=await api(db,B,{action:'catalog-repositories',installationId:8},{githubApp:app,qaGuard});
+    assert.equal(result.status,200);assert.equal(policyCalls,1);assert.equal(authorizationCalls,0);
+    assert.equal(result.body.analysis_policy,'qa_selected_fixtures');assert.equal(result.body.repositories.length,100);
+    assert.equal(result.body.repositories[0].analysis_access.can_analyze,true);
+    assert.equal(result.body.repositories[1].analysis_access.can_analyze,false);
+    assert.equal(result.body.repositories[1].analysis_access.qa_reason,'qa_fixture_only');
+    assert.equal(db.sql.prepare('SELECT count(*) AS n FROM workbench_projects').get().n,0);
+    assert.equal(db.sql.prepare('SELECT count(*) AS n FROM workbench_analysis_jobs').get().n,0);
+    const unavailable=await api(db,B,{action:'catalog-repositories',installationId:8},{githubApp:app,qaGuard:{async catalogPolicies(){return [];}}});
+    assert.equal(unavailable.status,503);assert.doesNotMatch(JSON.stringify(unavailable.body),/never-analyzed/);
+  } finally {db.close();}
 });
 
 test('A cannot read, review, import, export, compare, enqueue or delete B objects by changing IDs',async()=>{

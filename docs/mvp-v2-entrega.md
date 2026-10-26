@@ -443,3 +443,20 @@ serviço ativo. O orçamento vigente continua zero, e destino/projeto, modelo,
 dados permitidos e credencial protegida precisam ser delimitados antes dessa
 etapa. A orientação por regras não deve ser apresentada como análise por IA.
 A produção v15 e as permissões/recursos existentes não foram alterados.
+
+## Adendo — reconciliação e candidato cumulativo de 26/10/2026
+
+Os quatro heads remotos foram reconfirmados abertos em rascunho, sem merge:
+
+| PR | Head remoto exato | CI reconfirmada |
+| --- | --- | --- |
+| #43 | `71c878533270022aa68748f73b3f9f6a6f2727db` | [40237040753](https://github.com/ofelipepeixoto/security-workbench/actions/runs/40237040753), success |
+| #44 | `414faab6b044791756de1e658ad333627e782b0c` | [40326058256](https://github.com/ofelipepeixoto/security-workbench/actions/runs/40326058256), success |
+| #45 | `e071215feb21ed35207e250a7a949b5d8d592d93` | [40326275615](https://github.com/ofelipepeixoto/security-workbench/actions/runs/40326275615), success |
+| #46 | `1044098259bc1881e74a541ef54cb1f98ed0677f` | [40331645416](https://github.com/ofelipepeixoto/security-workbench/actions/runs/40331645416), success |
+
+O QA foi conferido somente leitura e continua com a fonte #43; não recebeu #44–#46. O candidato local acrescenta descoberta de metadados sem Contents, cobertura explícita e estados de análise, integração contextual server-side desligada, controle de canário e de INSERT da janela, telemetria numérica opt-in e empacotamento com preservação revisada da autenticação existente. Nenhum novo push, PR, deploy, migration remota, consentimento, job, cron, janela ou chamada de IA foi executado nesta preparação.
+
+A implementação contextual é distinta de um serviço ativo: possui autorização, aquisição mínima pinada, projeção estrutural, respostas/citações validadas, reserva atômica de custo, idempotência, retenção e controles de falha. Ainda exige projeto/modelo/dados/orçamento/purga aprovados e prova do provedor. O limite de custo vigente continua R$0 e chamadas reais permanecem bloqueadas. O teste local não comprova qualidade de modelo nem integração hospedada.
+
+Matriz pedido/entrega em [reconciliação](reconciliacao-entregas-2026-10-26.md), contrato e limites em [IA contextual](ia-contextual-integracao.md), roteiro de homologação/custo/rollback em [candidato QA](qa-candidato-2026-10-26.md). O relatório privado conserva o commit final local, os digests, recursos exatos e resultados do conjunto. A fonte testada do candidato só poderá ser implantada após autorização específica; a CI dos heads anteriores não é CI do candidato novo.

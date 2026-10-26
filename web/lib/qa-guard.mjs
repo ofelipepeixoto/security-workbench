@@ -2,7 +2,7 @@
 import {AnalysisJobError} from './analysis-jobs.mjs';
 import {GitHubAppError} from './github-app-client.mjs';
 
-export const QA_LIMITS=Object.freeze({days:7,jobsPerDay:50,dispatches:3,fetchesPerAttempt:16,bytesPerAttempt:2*1024*1024});
+export const QA_LIMITS=Object.freeze({days:7,jobsPerDay:50,dispatches:3,fetchesPerAttempt:16,bytesPerAttempt:2*1024*1024,canaryJobs:2,canaryDurationMs:900000});
 const ACTORS=new Set(['171351708','322086368']);
 // Read-only views of the already-public pilot policy, not an override. Tests
 // reuse these constants with fabricated provider data instead of copying IDs.
@@ -15,35 +15,39 @@ export function createQaGuard({env={},db=env.DB,now=()=>new Date()}={}) {
   const time=()=>{const n=new Date(now()).valueOf();if(!Number.isSafeInteger(n))throw deny();return n;};
   async function window() {
     let row;
-    try {row=await db.prepare('SELECT * FROM workbench_qa_window WHERE id=1').bind().first();}
+    try {row=await db.prepare('SELECT * FROM workbench_qa_active_window WHERE id=1').bind().first();}
     catch {throw deny('storage_unavailable',503);}
     const n=time();
-    if(!row||row.closed_at!==null||n<row.starts_at||n>=row.ends_at||row.ends_at-row.starts_at!==604800000)throw deny();
+    if(!row||row.closed_at!==null||n<row.starts_at||n>=row.ends_at||row.ends_at-row.starts_at!==(row.mode==='canary'?QA_LIMITS.canaryDurationMs:604800000))throw deny();
+    if(row.mode==='canary'&&row.source_sha!==env.WORKBENCH_QA_SOURCE_SHA)throw deny('qa_scope');
     return {...row,day:Math.floor((n-row.starts_at)/86400000),time:n};
   }
-  async function check({githubId,ownerId,repositoryId,installationId,repo}={}) {
+  async function check({githubId,ownerId,repositoryId,installationId,repo,revision}={}) {
     const w=await window(), actor=String(githubId);
     if(!ACTORS.has(actor)||typeof ownerId!=='string'||!ownerId||
       (actor==='171351708'?ownerId!==env.WORKBENCH_OWNER_ID:ownerId!==`github:${actor}`))throw deny('qa_scope');
     let fixtures;
     try {fixtures=JSON.parse(w.fixtures_json);}catch {throw deny('qa_scope');}
-    if(!Array.isArray(fixtures)||!fixtures.some(f=>f.githubId===actor&&f.repositoryId===repositoryId&&f.installationId===installationId&&(repo===undefined||f.repo===repo)&&
+    if(!Array.isArray(fixtures)||!fixtures.some(f=>f.githubId===actor&&f.repositoryId===repositoryId&&f.installationId===installationId&&(repo===undefined||f.repo===repo)&&(revision===undefined||f.revision===revision)&&
       REPOSITORY_SCOPE.test(f.repo)))throw deny('qa_scope');
     return w;
   }
   async function capacity(scope) {
     const w=await check(scope);
-    const n=await db.prepare('SELECT count(*) AS n FROM workbench_qa_reservations WHERE day=?').bind(w.day).first();
-    if(n.n>=QA_LIMITS.jobsPerDay)throw deny('qa_quota',429);
+    const n=await db.prepare('SELECT count(*) AS n,sum(CASE WHEN github_id=? THEN 1 ELSE 0 END) AS actor_n FROM workbench_qa_reservations WHERE day=?').bind(String(scope.githubId),w.day).first();
+    if(n.n>=(w.mode==='canary'?QA_LIMITS.canaryJobs:QA_LIMITS.jobsPerDay)||(w.mode==='canary'&&n.actor_n>=1))throw deny('qa_quota',429);
     return w;
   }
   async function reservation({jobId,ownerId,githubId,project,revision}) {
-    const w=await capacity({ownerId,githubId,repositoryId:project.repository_id,installationId:project.installation_id,repo:project.repo});
+    const w=await capacity({ownerId,githubId,repositoryId:project.repository_id,installationId:project.installation_id,repo:project.repo,revision});
     return db.prepare('INSERT INTO workbench_qa_reservations (job_id,owner_id,github_id,repository_id,installation_id,repo,revision,day,created_at) VALUES (?,?,?,?,?,?,?,?,?)')
       .bind(jobId,ownerId,String(githubId),project.repository_id,project.installation_id,project.repo,revision,w.day,w.time);
   }
   async function checkJob(job) {
-    return check({ownerId:job.owner_id,githubId:job.github_id,repositoryId:job.repository_id,installationId:job.installation_id,repo:job.repo});
+    const w=await check({ownerId:job.owner_id,githubId:job.github_id,repositoryId:job.repository_id,installationId:job.installation_id,repo:job.repo,revision:job.revision});
+    const created=Date.parse(job.created_at);
+    if(!Number.isFinite(created)||created<w.starts_at||created>=w.ends_at)throw deny('qa_closed');
+    return w;
   }
   async function dispatch(jobId,send) {
     const job=await db.prepare('SELECT * FROM workbench_analysis_jobs WHERE id=?').bind(jobId).first();
@@ -56,7 +60,17 @@ export function createQaGuard({env={},db=env.DB,now=()=>new Date()}={}) {
     if(result.meta?.changes!==1)return false;
     await send({jobId});return true;
   }
-  return {window,check,capacity,reservation,checkJob,dispatch};
+  async function catalogPolicies({ownerId,githubId,repositories=[]}={}) {
+    if(!Array.isArray(repositories)||repositories.length>100)throw deny('invalid_request',400);
+    let w;
+    try {w=await window();}catch(error){if(error.code==='qa_closed')return repositories.map(()=>({can_analyze:false,reason:'qa_not_activated'}));throw error;}
+    const actor=String(githubId);
+    let fixtures;try {fixtures=JSON.parse(w.fixtures_json);}catch {throw deny('qa_scope');}
+    const principal=ACTORS.has(actor)&&typeof ownerId==='string'&&ownerId&&(actor==='171351708'?ownerId===env.WORKBENCH_OWNER_ID:ownerId===`github:${actor}`);
+    return repositories.map(repository=>({can_analyze:Boolean(principal&&Array.isArray(fixtures)&&fixtures.some(f=>f.githubId===actor&&f.repositoryId===repository.repositoryId&&f.installationId===repository.installationId&&f.repo===repository.repo&&REPOSITORY_SCOPE.test(f.repo))),reason:'qa_fixture_only'})).map(p=>p.can_analyze?{can_analyze:true,reason:null}:p);
+  }
+  async function catalogPolicy(scope={}) {return (await catalogPolicies({...scope,repositories:[scope]}))[0];}
+  return {window,check,capacity,reservation,checkJob,dispatch,catalogPolicy,catalogPolicies};
 }
 
 /** Per-attempt transport, shared by authorization, refresh and acquisition.

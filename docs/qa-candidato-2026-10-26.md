@@ -1,0 +1,79 @@
+# Candidato QA cumulativo — 26/10/2026
+
+O candidato local parte da árvore de #46 (`1044098259bc1881e74a541ef54cb1f98ed0677f`) e acrescenta descoberta de metadados, revisão contextual desligada e os controles abaixo. Seu commit final e os digests dos dois pacotes devem acompanhar a aprovação privada. Esta documentação não declara implantação ou homologação. O QA conhecido ainda aponta para #43; produção v15 não faz parte desta mudança.
+
+## Mudanças verificáveis deste recorte
+
+- `scripts/qa-control.mjs`: preflight independente não exige a falsa premissa de compatibilidade já comprovada. `canary-sql` exige autorização separada e gera uma abertura de 15 minutos; `activate-sql` exige evidência estruturada de canário hospedado, vinculada ao candidato, ao digest das fixtures/IDs/SHAs e às duas versões implantadas. O antigo booleano `compatibilityVerified` não comprova compatibilidade.
+- `0009_qa_compatibility_canary.sql`: a migration não abre período algum. Canário e janela formal são registros separados, imutáveis, com retenção protegida. O SQL gerado ancora início/fim no relógio real do banco no momento do INSERT. O trigger também rejeita abertura distante mais de cinco segundos do relógio SQL, fixtures incompletas, identidades/IDs inválidos e SHA fora do contrato. Essa tolerância técnica não autoriza retrodatação para aprovação.
+- Canário: dois jobs no total, no máximo um por conta, 15 minutos, candidato e fixtures/IDs/SHAs explícitos; usa o mesmo ledger durável de quotas. Nova abertura/reinício não é permitido. Só pode abrir a janela formal depois de fechar o canário. Reservas do canário permanecem contadas no primeiro bucket da janela formal.
+- As autorizações, claims, aquisição e gravação final usam o mesmo intervalo ativo. Um job antigo do canário não pode ser reaproveitado na janela formal, inclusive se a troca ocorrer entre a última autorização e a transação do resultado.
+- Descoberta QA consulta a política persistida uma vez por página, até 100 metadados; devolve apenas elegibilidade/razão por item. Não retorna a lista privada de fixtures, resolve SHA, cria job, adquire código ou inicia período. Sem período ativo, a análise permanece bloqueada.
+- `prepare-qa-workers.mjs`: exige versão de fonte e produz digests privados de metadata, módulos e payload. Sem snapshot, o pacote mantém login/App/multiusuário desligados. Com `existingPlainBindings` de leitura recente e revisada, preserva por Worker somente a configuração pública de autenticação já existente, incluindo `GITHUB_LOGIN_CLIENT_ID` e a versão de sessão vigente quando presente, sem novo consentimento ou ampliação de escopo. Owner, duas contas permitidas e origem têm validação estrita. O escopo aprovado da App (`approvedGitHubApp: {appId, slug, keyVersion}`) fica no manifesto privado, conferido contra leitura recente da mesma conta/Workers, e precisa coincidir exatamente com os bindings preservados; o código compartilhado não fixa os identificadores operacionais da App. O pacote/digests e a versão de fonte vinculam o conteúdo a essa revisão, sem conceder novas permissões; tipos secretos, nomes desconhecidos, duplicatas e flags de processamento/modelo/logs não são preserváveis. Jobs, IA contextual e telemetria ficam obrigatoriamente desligados; cron ausente, Queue consumer desacoplado e segundo D1 sem binding de produto. `keep_bindings: ['secret_text']` preserva segredos já protegidos sem ler seus valores; presença e escopo devem ser conferidos antes de aplicar.
+
+## Aprovações externas em fases
+
+1. **Código:** publicar os pequenos diffs revisados sobre a cadeia existente, sem duplicar #44–#46. CI nova pertence ao novo head; CI antiga não é evidência do candidato.
+2. **Implantação de código QA:** somente `security-workbench-qa` e `security-workbench-analysis-qa`, na conta já confirmada, com D1 operacional e Queue próprios existentes. Aplicar migrations locais aprovadas após preflight/backup e ensaio no D1 de restauração. Não criar outra conta, serviço, banco de produto, segredo ou permissão. Não ativar jobs, janela, cron ou consentimentos implicitamente. Preservar autenticação/App já habilitadas mediante snapshot protegido conferido, em vez de desligá-las por acidente no deploy de código; diferenças de auth exigem aprovação separada.
+3. **Consentimento A/B:** titular de cada conta usa a tela protegida para autorizar apenas as fixtures privadas `ofelipepeixoto/security-workbench-qa-fixture` e `radartech-news/security-workbench-qa-fixture`. Conferir repository ID, installation ID e SHA de cada uma no pacote privado. Uma autorização de descoberta ampla não amplia a política de análise QA. Negar consentimento precisa continuar sendo uma jornada válida.
+4. **Canário de compatibilidade:** autorização separada para as duas contas/fixtures/SHAs, dois jobs totais e 15 minutos. Queue real com lote 1, concorrência 1, no máximo uma reentrega, sem cron. Medir CPU do Worker pela observabilidade Cloudflare, duração, chamadas, bytes, operações reais D1/Queue e erros. As contagens locais abaixo não são CPU nem consumo hospedados. Parar se faltar telemetria suficiente, houver erro de autorização/isolamento ou consumo ultrapassar o limite. Fechar o canário, desligar processamento e desacoplar consumer ao final.
+5. **Janela formal:** somente após o canário passar e existir procedimento de remoção de cron/dispatcher testado e agendado para o término. `activate-sql` exige métricas de duas contas, fontes/versões exatas, canário encerrado e CPU máxima medida ≤10 ms, duração ≤45 s, até 16 requisições GitHub e 2 MiB por tentativa; D1 até 50 chamadas e Queue até 30 operações no canário. Evidência é atestada pelo operador a partir das medições, não fabricada por um booleano ou pelo teste local. INSERT efetivo registra sete dias, sem upsert, reinício ou retrodatação.
+6. **Modelo:** projeto/modelo/dados/retorno/retensão/orçamento e destino de credencial são outra aprovação. A revisão contextual fica desligada com orçamento incremental zero. Canário de aquisição e janela formal não ativam OpenAI.
+
+## Limites e custo
+
+Somente Workers Free. O painel e a franquia compartilhada precisam ser relidos antes de cada ativação; não basta a palavra “Free”. Nenhum upgrade/contratação, fallback pago ou chamada paga de IA está incluído. Se a capacidade atual não bastar, interromper a etapa; não trocar de plano.
+
+O limite existente é de 50 admissões por bucket de 24 horas a partir do início efetivo, somadas A/B, em sete buckets. Cancelamento, duplicata, falha e reentrega não devolvem admissão. Os dois jobs do canário consomem o mesmo ledger: no máximo 348 admissões adicionais na janela, 350 com o canário. Há uma execução ativa por usuário, duas globais; configuração de Queue com concorrência 1 no canário é mais restritiva.
+
+| Dimensão | Canário de 2 jobs | Bucket de até 50 jobs |
+| --- | --- | --- |
+| Tentativas do produto | até 4 | até 100 |
+| Requisições GitHub | até 64 | até 1.600 |
+| Corpos de resposta GitHub | até 8 MiB | até 200 MiB |
+| Envios de Queue (máximo 3/job) | até 6 | até 150 |
+| Operações estimadas Queue, mensagem pequena e até uma reentrega | até 24, reserva 30 | até 600 |
+
+São tetos de política/estimativas, não consumo medido. Navegação, login, catálogo, status, revisões, dispatcher, backup e migrations são operações adicionais. Como a franquia Cloudflare reinicia em UTC e os buckets de produto começam na ativação, um dia UTC pode conter partes de dois buckets; dimensionar capacidade com margem para até 100 admissões nessa fronteira, sem aumentar a quota do produto. D1 cobra/limita linhas, não quantidade de jobs ou apenas quantidade de consultas; medir `meta.rows_read`, `meta.rows_written`, tamanho e chamadas. Queue conta escrita/leitura/exclusão por mensagem e frações de 64 KB, não apenas jobs. CPU de espera de rede é diferente de duração total.
+
+O custo incremental previsto é R$0 **sob o plano Free confirmado e seus bloqueios/franquias disponíveis**; exceder capacidade provoca parada/falha, não autoriza upgrade. A viabilidade de CPU do candidato ainda depende da medição hospedada. A versão antes implantada e médias agregadas da conta não comprovam compatibilidade deste candidato.
+
+Referências oficiais consultadas em 26/10/2026: [Workers limites](https://developers.cloudflare.com/workers/platform/limits/), [preços Workers/Queue/D1](https://developers.cloudflare.com/workers/platform/pricing/), [D1 limites e semântica de batch](https://developers.cloudflare.com/d1/platform/limits/) e [Queue no Free](https://developers.cloudflare.com/changelog/post/2026-02-04-queues-free-plan/).
+
+## Telemetria sanitizada preparada
+
+`qa-metrics.mjs` e o consumer têm um emissor opt-in: somente `WORKBENCH_QA_ENABLED=true` **e** `WORKBENCH_QA_METRICS_ENABLED=true` o habilitam. O pacote o mantém desligado. A ativação de logs/observabilidade, destino protegido, retenção e franquia disponível precisam integrar a aprovação do canário, sem copiar logs brutos ao repositório público.
+
+O emissor produz no máximo um pequeno registro por chamada de processamento: referência opaca derivada do job, contadores numéricos GitHub, tentativas de API/statements D1, linhas observadas nos metadados, duração de parede, resultado e categoria fixa de erro. Não registra SQL, URLs, repositórios, caminhos, corpos, cabeçalhos, credenciais, IDs de conta/instalação ou o ID bruto do job. O wrapper conserva first/all/run/bind/batch e rollback sem consultas adicionais. Como `first()` não retorna `meta`, `d1_meta_missing` indica explicitamente que a soma de linhas é parcial; completar com métricas reais do D1 durante o canário, sem tratar esse subtotal como cobrança total.
+
+`cpu_ms` permanece **null**, com origem `cloudflare_trace_required`. CPU exige o trace/métrica real da Cloudflare correlacionado à invocação, não `Date.now()`, tempo de rede ou a máquina local. Um erro do destino de diagnóstico não muda a autorização ou resultado do produto; ausência/incompletude da evidência bloqueia a aprovação da compatibilidade.
+
+## Evidência local e o que continua pendente
+
+Os testes locais usam SQLite e o caminho real de serviço/auth/client/guard/scanner/consumer com transporte sintético sem rede externa. Verificam INSERT real, escopo/SHA, limite combinado e por ator do canário, concorrência, imutabilidade, atraso entre autorização/gravação, reentrega, encerramento e preservação do ledger. `audit-d1-migrations.mjs` aplica todas as migrations disponíveis em D1 local Miniflare, testa preservação e rollback em inconsistência e confirma zero aberturas. Isso não é migration remota, OAuth real, Queue real ou observação de sete dias.
+
+`scripts/qa-synthetic-restore.py` executa um ensaio concreto, somente local e sem rede: três arquivos SQLite distintos (fonte → backup pela API SQLite → restauração pela API SQLite), quatro registros fictícios A/B e os quatro estados de decisão. Compara digest normalizado, integridade, idempotência e leitura negativa B→A. Destino ocupado, schema ou dados divergentes interrompem o ensaio, preservando arquivos anteriores. Emite oito statements revisáveis, somente em duas tabelas `qa_restore_synthetic_<hash>_*`, sem DROP/DELETE/REPLACE ou tabela do produto. Para o futuro ensaio hospedado, conferir primeiro o segundo D1 aprovado, comparar o schema prévio com o contrato exportado e executar em um batch atômico; o programa não conhece endpoints/credenciais Cloudflare e nunca executa SQL remoto. O ensaio local passou; backup/restauração hospedados permanecem pendentes.
+
+Baseline sintético do novo guard, com um arquivo: 12 chamadas GitHub e 36 chamadas D1 (37 statements); com dois arquivos: 13 GitHub e 37 D1 (38 statements). O mock mede contagem de chamadas, não linhas faturáveis ou CPU. O canário precisa medir essas dimensões novamente no candidato implantado.
+
+| Jornada no candidato hospedado | Evidência exigida | Estado neste recorte |
+| --- | --- | --- |
+| Login/saída A/B, negar consentimento, identidade verde correta | sessões das duas contas, sem segredo/cookie no relatório | Pendente |
+| Catálogo nunca analisado, >100 itens, múltiplas instalações, forks/arquivados, cobertura parcial e retomada | páginas e contagens honestas, negar acesso perde nomes privados | Pendente; contratos locais |
+| Seleção sem SHA/job; ação de análise revalida e fixa commit | contadores antes/depois e SHA exato | Pendente; contratos locais |
+| Isolamento por IDs adulterados e resposta atrasada A→B/logout | nenhuma linha, arquivo, nome privado, cache ou download cruzado | Pendente; contratos locais |
+| Aquisição, Queue, revogação no meio, idempotência, reentrega, cancelamento, timeout e recuperação | resultado/estado/telemetria por job | Pendente; contratos locais |
+| Revisão persistida, comparação, Markdown baixado e aberto, orientador por regras | arquivos abertos, decisões e referências preservadas | Pendente; contratos locais |
+| Desktop, mobile e teclado completos | versão implantada, viewport, foco e jornada inteira | Pendente; SSR não basta |
+| Modelo contextual | qualidade rotulada, citações/abstinência/injection/A-B e custo real | Bloqueado por aprovação própria e R$0 |
+| D+1 / D+3 / D+7 | observação real, início/fim persistidos e parada | Pendente; não simular tempo para aprovação |
+
+## Preflight, parada e reversão
+
+Antes de SQL: conferir conta/nomes/IDs/origem/bindings/secrets somente por presença, digests do candidato e versões de rollback; migrations aplicadas e hashes, `integrity_check`, `foreign_key_check`, relações owner/repo/run/jobs, ausência de janela/canário anterior, jobs/leases/backlog e cotas atuais. Qualquer inconsistência interrompe o processo, sem atribuir dados antigos a novos usuários. Backup deve ficar protegido; ensaio de restauração usa apenas o segundo D1 e dados sintéticos, nunca o associa ao Worker de produto.
+
+Antes de ativar: certificar que nenhum processamento recorrente foi habilitado por deploy de código. Interromper imediatamente em vazamento A/B, consentimento inesperado, perda de acesso, divergência de IDs/SHA/versões, excesso de CPU/chamadas/bytes/ops, falha de medição ou indicação de cobrança. Não contornar teste, ampliar timeout, trocar plano ou afrouxar fixtures.
+
+No término: `close-sql` encerra canário/janela uma única vez, cancela jobs pendentes e preserva evidências/ledger; remover cron, desligar dispatcher e novas análises, desacoplar consumer e conferir backlog/ausência de novos envios. A expiração no banco bloqueia aquisição/gravação, mas **não remove um Cron Trigger do painel**. Remoção de cron precisa de execução externa autorizada e verificada, preparada antes da janela; não deixar recorrência ativa esperando uma futura conversa. Sem esse mecanismo, não iniciar a janela formal.
+
+Rollback: primeiro fechar admissão e processamento, depois retornar somente os dois Workers QA às versões registradas antes do deploy, mantendo flags de processamento desligadas. Migrations novas são aditivas; não executar down migration nem apagar tabelas, reservas, resultados ou backup. A produção v15 não é destino nem rollback. Limpeza permanente de recursos, evidências ou dados depende de autorização separada.

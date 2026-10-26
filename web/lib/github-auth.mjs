@@ -157,7 +157,7 @@ export function createGitHubAuth({ config, db, fetcher = fetch, now = () => new 
   };
   const invalidCallback = status => redirect(`/access?auth=${status}`, 303, [cookie(FLOW_COOKIE, '', 0)]);
 
-  async function getSession(request) {
+  async function getSession(request, { throwOnUnavailable = false } = {}) {
     if (!usable(request)) return null;
     const token = readCookie(request, SESSION_COOKIE);
     if (!token) return null;
@@ -167,8 +167,15 @@ export function createGitHubAuth({ config, db, fetcher = fetch, now = () => new 
       if (!principal || row.config_key !== await key() || row.owner_id !== principal.userId) return null;
       const csrfToken = await digest(`workbench-csrf\0${token}`);
       if (row.csrf_hash !== await digest(csrfToken)) return null;
-      return { ...principal, displayName: row.display_name, provider: 'github', csrfToken };
-    } catch { return null; }
+      // A UI-only marker detects account/session changes without exposing the
+      // cookie, its stored hash, the CSRF value or a stable account identifier.
+      // This domain-separated digest is never accepted as a credential.
+      const sessionKey = await digest(`workbench-session-ui\0${token}`);
+      return { ...principal, displayName: row.display_name, provider: 'github', csrfToken, expiresAt: row.expires_at * 1000, sessionKey };
+    } catch {
+      if (throwOnUnavailable) throw new Error('session_unavailable');
+      return null;
+    }
   }
 
   return {

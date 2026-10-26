@@ -1,10 +1,12 @@
 "use client";
 // Full document navigation avoids the observed vinext production routing regression and reloads the server authorization gate.
-import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Activity, ArrowLeft, ArrowRight, Check, CheckCircle2, ChevronRight, Download, FileCode2, FileText, FolderGit2, GitBranch, LayoutDashboard, LockKeyhole, Plus, RefreshCw, Search, Settings2, Shield, SlidersHorizontal, X, AlertCircle, Menu, User, CircleHelp, ListChecks } from "lucide-react";
 import { GitHubCatalogController, catalogFailureScope, type CatalogCall } from "../components/github-catalog-controller";
+import { GitHubSessionStatus, type GitHubSessionSnapshot } from "../components/github-session-status";
 import { OperationalInfo } from "../components/operational-info";
 import { newReaImportAttemptTracker } from "../lib/rea-import-attempt.mjs";
+import { applyWorkbenchRequest, callWorkbenchCatalog, createWorkbenchCatalogRecovery, createWorkbenchRequestScope, downloadWorkbenchMarkdown as download, exportWorkbenchReport, invalidateWorkbenchAccess } from "../lib/workbench-request-scope.mjs";
 import { demoProject, demoRun, resetDemo, updateDemoRuns, useDemoHydrated, useDemoRuns } from "../components/demo-workbench";
 import type { Comparison, Filters, Finding, FindingsResult, HistoricalFinding, Project, Run, WorkbenchView } from "../components/workbench-types";
 
@@ -23,6 +25,7 @@ const navigation = [
   { id: "help", label: "Ajuda", icon: CircleHelp },
 ];
 const emptyRuns: Run[] = [];
+const anonymousSession: GitHubSessionSnapshot = { state: "anonymous" };
 const emptyFilters: Filters = { q: "", project: "", status: "", kind: "", from: "", to: "", before: "", after: "", run: "" };
 
 class ApiError extends Error { constructor(message: string, public status: number, public code?: string, public retryAt?: string) { super(message); } }
@@ -38,11 +41,6 @@ function date(value: string) {
   const parsed = new Date(value);
   return Number.isNaN(parsed.valueOf()) ? "Horário indisponível" : new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "UTC" }).format(parsed) + " UTC";
 }
-function download(content: string, filename: string) {
-  const url = URL.createObjectURL(new Blob([content], { type: "text/markdown;charset=utf-8" }));
-  const anchor = document.createElement("a"); anchor.href = url; anchor.download = filename; document.body.appendChild(anchor); anchor.click(); anchor.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
 function demoReport(run: Run) {
   return "# Security Workbench — EXEMPLO FICTÍCIO\n\nNenhum repositório foi analisado. Revisões fictícias ficam somente neste navegador.\n\nRepositório: " + run.repo + "\n\nCommit fictício: " + run.revision + "\n\nCobertura parcial: exemplo de " + run.files_read + " arquivos.\n\n" + (run.findings || []).map(item => "## " + kinds[item.kind] + "\n\nEstado: " + decisions[item.status] + "\n\n" + item.evidence + "\n\nImpacto possível: " + item.impact + "\n\nRecomendação: " + item.recommendation).join("\n\n") + "\n\nAusência de detecção não comprova segurança.\n";
 }
@@ -52,10 +50,10 @@ function matchesRun(run: Run, filters: Filters) {
 }
 function ErrorBox({ message }: { message: string }) { return <div className="notice error" role="alert"><AlertCircle size={18} /><span>{message}</span></div>; }
 function Empty({ title, children }: { title: string; children: ReactNode }) { return <div className="empty"><FileText size={28} aria-hidden="true" /><h2>{title}</h2>{children}</div>; }
-function Modal({ title, children, onClose, busy }: { title: string; children: ReactNode; onClose: () => void; busy: boolean }) {
+function Modal({ title, children, onClose, busy, wide = false }: { title: string; children: ReactNode; onClose: () => void; busy: boolean; wide?: boolean }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => { const dialog = ref.current; dialog?.showModal(); return () => dialog?.close(); }, []);
-  return <dialog ref={ref} onCancel={event => { event.preventDefault(); onClose(); }} className="modal" aria-labelledby="modal-title" aria-busy={busy}><div className="modal-head"><h2 id="modal-title">{title}</h2><button className="icon-button" onClick={onClose} disabled={busy} aria-label="Fechar"><X size={20} /></button></div>{children}</dialog>;
+  return <dialog ref={ref} onCancel={event => { event.preventDefault(); onClose(); }} className={wide ? "modal modal-catalog" : "modal"} aria-labelledby="modal-title" aria-busy={busy}><div className="modal-head"><h2 id="modal-title">{title}</h2><button className="icon-button" onClick={onClose} disabled={busy} aria-label="Fechar"><X size={20} /></button></div>{children}</dialog>;
 }
 export function WorkbenchListState({ loading, unavailable, children, retry }: { loading: boolean; unavailable: boolean; children: ReactNode; retry?: () => void }) {
   if (loading) return <p className="loading" role="status">Carregando lista…</p>;
@@ -143,7 +141,7 @@ function FindingCard({ finding, busy, save, index }: { finding: Finding; busy: b
   return <section className="finding" id={finding.fingerprint} tabIndex={-1} aria-labelledby={titleId}><div className="finding-heading"><span className="finding-index">{String(index + 1).padStart(2, "0")}</span><div className="grow"><p className="eyebrow">{finding.path}:{finding.line}</p><h3 id={titleId}>{kinds[finding.kind] || "Candidato detectado"}</h3></div><span className={"badge " + (finding.status === "candidate" ? "amber" : "")}>{decisions[finding.status] || finding.status}</span></div><div className="finding-content">{finding.kind.startsWith("rea-structural-") && <p className="finding-context">Esta observação descreve uma estrutura do código. Sua presença, por si só, não confirma uma vulnerabilidade.</p>}<div className="evidence-label">EVIDÊNCIA · CONFIANÇA {confidence[finding.confidence]?.toUpperCase() || finding.confidence}</div><p className="evidence">{finding.evidence}</p><div className="finding-guidance"><div><h4>Impacto possível</h4><p>{finding.impact}</p></div><div><h4>O que fazer</h4><p>{finding.recommendation}</p></div></div><form className="review-row" aria-labelledby={titleId} onSubmit={event => { event.preventDefault(); save(finding, decision); }}><div className="review-choice"><label htmlFor={selectId}>Sua decisão <span className="sr-only">sobre {finding.path}, linha {finding.line}</span></label><select id={selectId} aria-describedby={helpId} value={decision} onChange={event => setDecision(event.target.value)} disabled={busy}>{Object.entries(decisions).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><p id={helpId}>{decisionHelp[decision] || "Confira a evidência antes de registrar a decisão."}</p></div><button className="button secondary" disabled={busy}><Check size={16} />{busy ? "Salvando…" : "Salvar revisão"}<span className="sr-only"> de {finding.path}, linha {finding.line}</span></button></form></div></section>;
 }
 
-export default function Workbench({ signedIn, name, githubReady = false, csrfToken = "", initialView = "dashboard", initialRunId = "", initialFilters = emptyFilters, demoRequested = false }: { signedIn: boolean; name: string; githubReady?: boolean; csrfToken?: string; initialView?: WorkbenchView; initialRunId?: string; initialFilters?: Filters; demoRequested?: boolean }) {
+export default function Workbench({ signedIn, name, initialSession = anonymousSession, githubReady = false, csrfToken = "", initialView = "dashboard", initialRunId = "", initialFilters = emptyFilters, demoRequested = false }: { signedIn: boolean; name: string; initialSession?: GitHubSessionSnapshot; githubReady?: boolean; csrfToken?: string; initialView?: WorkbenchView; initialRunId?: string; initialFilters?: Filters; demoRequested?: boolean }) {
   const demo = !signedIn || demoRequested;
   const demoRuns = useDemoRuns();
   const demoHydrated = useDemoHydrated();
@@ -151,19 +149,23 @@ export default function Workbench({ signedIn, name, githubReady = false, csrfTok
   const [loading, setLoading] = useState(signedIn && !demo && initialView !== "repositories"), [busy, setBusy] = useState(false), [error, setError] = useState(""), [notice, setNotice] = useState("");
   const [listFailed, setListFailed] = useState(false), [listAccessRestricted, setListAccessRestricted] = useState(false), [aggregateAccessRestricted, setAggregateAccessRestricted] = useState(false);
   const accessRestricted = listAccessRestricted || aggregateAccessRestricted;
-  const catalogCall: CatalogCall = useCallback(<T,>(payload: object, signal?: AbortSignal, endpoint = "/api/workbench") => api<T>(payload, csrfToken, signal, endpoint), [csrfToken]);
+  const [accessRequests] = useState(() => createWorkbenchRequestScope({ expiresAt: initialSession.state === "authenticated" ? initialSession.expiresAt : Infinity }));
   const [sessionLost, setSessionLost] = useState(false), [refreshKey, setRefreshKey] = useState(0), [mobileMenu, setMobileMenu] = useState(false);
-  const [modal, setModal] = useState<"project" | "scan" | "rea" | null>(null), [repo, setRepo] = useState(""), [identity, setIdentity] = useState<{ repo: string; id: number; branch: string } | null>(null), [confirmed, setConfirmed] = useState(false);
+  const [modal, setModal] = useState<"project" | "scan" | "catalog" | "rea" | null>(null), [repo, setRepo] = useState(""), [identity, setIdentity] = useState<{ repo: string; id: number; branch: string } | null>(null), [confirmed, setConfirmed] = useState(false);
+  const [catalogBusy, setCatalogBusy] = useState(false);
+  const [catalogRecovery] = useState(createWorkbenchCatalogRecovery);
+  const [catalogAccessBlocked, setCatalogAccessBlocked] = useState(false);
   const [projectId, setProjectId] = useState(""), [revision, setRevision] = useState(""), [advanced, setAdvanced] = useState(false);
   const [aggregate, setAggregate] = useState<FindingsResult | null>(null), [aggregateError, setAggregateError] = useState("");
   const [before, setBefore] = useState(initialFilters.before), [after, setAfter] = useState(initialFilters.after), [comparison, setComparison] = useState<Comparison | null>(null);
   const [linkedRuns, setLinkedRuns] = useState<Run[]>([]);
-  const [report, setReport] = useState<{ filename: string; markdown: string } | null>(null);
+  const [report, setReport] = useState<{ filename: string; markdown: string; isCurrent: () => boolean } | null>(null);
   const [reaFile, setReaFile] = useState<File | null>(null), [reaConfirmed, setReaConfirmed] = useState(false);
   const reaAttempts = useRef(newReaImportAttemptTracker());
   const reaSubmitting = useRef(false);
   const mobileMenuTrigger = useRef<HTMLButtonElement>(null);
   const accessRecoveryAttempted = useRef(false);
+  const catalogNavigation = useRef<() => boolean>(() => false);
   const listUnavailable = listFailed || sessionLost;
   const projects = demo ? [demoProject] : sessionLost ? [] : realProjects;
   const runs = demo ? demoRuns : sessionLost ? emptyRuns : realRuns;
@@ -185,16 +187,35 @@ export default function Workbench({ signedIn, name, githubReady = false, csrfTok
   };
   const handleFailure = useCallback((cause: unknown) => {
     if (cause instanceof Error && cause.name === "AbortError") return;
+    // Invalidate synchronously, before React's next render or effect cleanup.
+    // A late HTTP 200 must never download, navigate or repopulate old data.
+    const scope = invalidateWorkbenchAccess(accessRequests, cause, catalogRecovery);
     setError(cause instanceof Error ? cause.message : "Não foi possível concluir. Tente novamente.");
-    if (cause instanceof ApiError && [401, 403, 404].includes(cause.status) && ["disconnected", "not_connected", "expired", "revoked", "forbidden", "suspended", "insufficient_permission", "not_found"].includes(cause.code || "")) {
-      reaAttempts.current.invalidate(); setProjects([]); setRuns([]); setLinkedRuns([]); setSelected(null); setAggregate(null); setReport(null); setListAccessRestricted(true); setAggregateAccessRestricted(true); setListFailed(true);
+    if (scope === "repository_access" || scope === "login_session") {
+      // Drop the catalog's already-loaded rows as well as in-flight responses.
+      // Repository revocation does not invalidate the independent login.
+      setCatalogAccessBlocked(true);
+      reaAttempts.current.invalidate(); reaSubmitting.current = false; setBusy(false); setCatalogBusy(false); setModal(null); setIdentity(null); setReaFile(null); setReaConfirmed(false); setNotice(""); setComparison(null); setBefore(""); setAfter(""); setProjects([]); setRuns([]); setLinkedRuns([]); setSelected(null); setAggregate(null); setReport(null);
+    }
+    if (scope === "repository_access") {
+      setListAccessRestricted(true); setAggregateAccessRestricted(true); setListFailed(true);
       // Refresh only metadata once after a permission change. Never enqueue or
       // retry an analysis, and never leave cached private data on this screen.
       if (!accessRecoveryAttempted.current && initialView !== "repositories") { accessRecoveryAttempted.current = true; setLoading(true); setRefreshKey(value => value + 1); }
       return;
     }
-    if (cause instanceof ApiError && [401, 403].includes(cause.status)) { reaAttempts.current.invalidate(); setSessionLost(true); setProjects([]); setRuns([]); setSelected(null); setAggregate(null); setReport(null); }
-  }, [initialView]);
+    if (scope === "login_session") { setSessionLost(true); setLoading(false); }
+  }, [accessRequests, catalogRecovery, initialView]);
+  const handleSessionLost = useCallback(() => handleFailure(new ApiError("Sua sessão GitHub não está confirmada. Entre novamente ou recarregue com a conta atual antes de consultar dados reais.", 401)), [handleFailure]);
+  const catalogCall: CatalogCall = useCallback(async <T,>(payload: object, signal?: AbortSignal, endpoint = "/api/workbench"): Promise<T> => {
+    const request = accessRequests.begin(signal);
+    return callWorkbenchCatalog(request, catalogRecovery, current => api<T>(payload, csrfToken, current.signal, endpoint), handleFailure, result => {
+      if (endpoint === "/api/auth/github-app/disconnect" && (result as { ok?: boolean }).ok) handleFailure(new ApiError("A conexão da GitHub App foi removida. O login permanece separado; revalide o acesso aos repositórios.", 401, "disconnected"));
+    });
+  }, [accessRequests, catalogRecovery, csrfToken, handleFailure]);
+  // The parent must open before the catalog's passive effects capture tickets.
+  // Layout cleanup/reopening also preserves StrictMode's setup/cleanup replay.
+  useLayoutEffect(() => { accessRequests.open(); return () => accessRequests.close(); }, [accessRequests]);
   useEffect(() => {
     if (!mobileMenu) return;
     const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") { setMobileMenu(false); mobileMenuTrigger.current?.focus(); } };
@@ -207,102 +228,173 @@ export default function Workbench({ signedIn, name, githubReady = false, csrfTok
     return () => window.removeEventListener("pageshow", onPageShow);
   }, []);
   useEffect(() => {
-    if (demo || !signedIn || initialView === "repositories") return;
-    const controller = new AbortController();
-    api<{ projects: Project[]; runs: Run[]; access_restricted?: boolean }>(undefined, csrfToken, controller.signal).then(result => { setProjects(result.projects); setRuns(result.runs); setListAccessRestricted(Boolean(result.access_restricted)); setListFailed(false); setLoading(false); }).catch(cause => { if (cause.name === "AbortError") return; handleFailure(cause); setListFailed(true); setLoading(false); });
-    return () => controller.abort();
-  }, [signedIn, demo, initialView, csrfToken, refreshKey, handleFailure]);
+    if (demo || !signedIn || sessionLost || initialView === "repositories") return;
+    const request = accessRequests.begin();
+    void applyWorkbenchRequest(request, current => api<{ projects: Project[]; runs: Run[]; access_restricted?: boolean }>(undefined, csrfToken, current.signal), {
+      success(result) { setProjects(result.projects); setRuns(result.runs); setListAccessRestricted(Boolean(result.access_restricted)); setListFailed(false); setLoading(false); },
+      failure(cause) { handleFailure(cause); setListFailed(true); setLoading(false); },
+    });
+    return request.finish;
+  }, [accessRequests, signedIn, demo, sessionLost, initialView, csrfToken, refreshKey, handleFailure]);
   useEffect(() => {
-    if (demo || !signedIn || !needsAggregate) return;
-    const controller = new AbortController();
-    api<FindingsResult>({ action: "findings" }, csrfToken, controller.signal).then(result => { setAggregate(result); setAggregateAccessRestricted(Boolean(result.access_restricted)); setAggregateError(""); }).catch(cause => { if (cause.name !== "AbortError") { setAggregateError("As decisões de revisão não puderam ser carregadas."); handleFailure(cause); } });
-    return () => controller.abort();
-  }, [demo, signedIn, needsAggregate, csrfToken, refreshKey, handleFailure]);
+    if (demo || !signedIn || sessionLost || !needsAggregate) return;
+    const request = accessRequests.begin();
+    void applyWorkbenchRequest(request, current => api<FindingsResult>({ action: "findings" }, csrfToken, current.signal), {
+      success(result) { setAggregate(result); setAggregateAccessRestricted(Boolean(result.access_restricted)); setAggregateError(""); },
+      failure(cause) { setAggregateError("As decisões de revisão não puderam ser carregadas."); handleFailure(cause); },
+    });
+    return request.finish;
+  }, [accessRequests, demo, signedIn, sessionLost, needsAggregate, csrfToken, refreshKey, handleFailure]);
   useEffect(() => {
-    if (demo || !signedIn || initialView !== "detail" || !initialRunId) return;
-    const controller = new AbortController();
-    api<{ run: Run }>({ action: "run", runId: initialRunId }, csrfToken, controller.signal).then(result => setSelected(result.run)).catch(handleFailure);
-    return () => controller.abort();
-  }, [demo, signedIn, initialView, initialRunId, csrfToken, handleFailure]);
+    if (demo || !signedIn || sessionLost || initialView !== "detail" || !initialRunId) return;
+    const request = accessRequests.begin();
+    void applyWorkbenchRequest(request, current => api<{ run: Run }>({ action: "run", runId: initialRunId }, csrfToken, current.signal), { success: result => setSelected(result.run), failure: handleFailure });
+    return request.finish;
+  }, [accessRequests, demo, signedIn, sessionLost, initialView, initialRunId, csrfToken, handleFailure]);
   useEffect(() => {
-    if (demo || !signedIn || initialView !== "reports" || !initialFilters.run) return;
-    const controller = new AbortController();
-    api<{ filename: string; markdown: string }>({ action: "report", runId: initialFilters.run }, csrfToken, controller.signal).then(setReport).catch(handleFailure);
-    return () => controller.abort();
-  }, [demo, signedIn, initialView, initialFilters.run, csrfToken, handleFailure]);
+    if (demo || !signedIn || sessionLost || initialView !== "reports" || !initialFilters.run) return;
+    const request = accessRequests.begin();
+    void applyWorkbenchRequest(request, current => api<{ filename: string; markdown: string }>({ action: "report", runId: initialFilters.run }, csrfToken, current.signal), { success: result => setReport({ ...result, isCurrent: accessRequests.capture() }), failure: handleFailure });
+    return request.finish;
+  }, [accessRequests, demo, signedIn, sessionLost, initialView, initialFilters.run, csrfToken, handleFailure]);
 
   useEffect(() => {
     if (demo || !signedIn || sessionLost || loading || listFailed || initialView !== "compare") return;
     const missing = [...new Set([initialFilters.before, initialFilters.after])].filter(id => id && !runs.some(run => run.id === id) && !linkedRuns.some(run => run.id === id));
     if (!missing.length) return;
-    const controller = new AbortController();
-    Promise.all(missing.map(runId => api<{ run: Run }>({ action: "run", runId }, csrfToken, controller.signal))).then(results => setLinkedRuns(current => [...current, ...results.map(result => result.run)])).catch(handleFailure);
-    return () => controller.abort();
-  }, [demo, signedIn, sessionLost, loading, listFailed, initialView, initialFilters.before, initialFilters.after, runs, linkedRuns, csrfToken, handleFailure]);
+    const request = accessRequests.begin();
+    void applyWorkbenchRequest(request, current => Promise.all(missing.map(runId => api<{ run: Run }>({ action: "run", runId }, csrfToken, current.signal))), { success: results => setLinkedRuns(current => [...current, ...results.map(result => result.run)]), failure: handleFailure });
+    return request.finish;
+  }, [accessRequests, demo, signedIn, sessionLost, loading, listFailed, initialView, initialFilters.before, initialFilters.after, runs, linkedRuns, csrfToken, handleFailure]);
 
   function refresh() { accessRecoveryAttempted.current = false; setLoading(true); setListFailed(false); setError(""); setAggregateError(""); setRefreshKey(value => value + 1); }
   function openProject() { reaAttempts.current.invalidate(); setError(""); setIdentity(null); setRepo(""); setConfirmed(false); setModal("project"); }
-  function openScan(id?: string) { reaAttempts.current.invalidate(); const target = id ? projects.find(project => project.id === id) : projects[0]; if (target?.source === "github-app" || target?.installation_id) { go("/repositories"); return; } if (!projects.length) { if (!demo) go("/repositories"); else openProject(); return; } setError(""); setProjectId(id || projects[0].id); setRevision(""); setAdvanced(false); setModal("scan"); }
+  function openScan(id?: string) {
+    if (!accessRequests.isOpen()) return;
+    reaAttempts.current.invalidate();
+    const target = id ? projects.find(project => project.id === id) : projects[0];
+    // New real analyses start with the current authorized GitHub catalog,
+    // independently of projects already persisted in the Workbench.
+    if (!demo && (!id || target?.source === "github-app" || target?.installation_id || !target)) {
+      catalogRecovery.resume(); setCatalogAccessBlocked(false);
+      catalogNavigation.current = accessRequests.capture();
+      setError(""); setCatalogBusy(false); setModal("catalog"); return;
+    }
+    if (!target) { openProject(); return; }
+    setError(""); setProjectId(target.id); setRevision(""); setAdvanced(false); setModal("scan");
+  }
   function showDemo() {
     resetDemo();
     // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- Explicitly enter the fictitious mode with a full reload.
     window.location.assign("/dashboard?demo=1");
   }
   function openRea() { reaAttempts.current.invalidate(); setError(""); setProjectId(projects[0]?.id || ""); setRevision(""); setReaFile(null); setReaConfirmed(false); setModal("rea"); }
+  function retryCatalog() { if (!accessRequests.isOpen()) return; catalogRecovery.resume(); setError(""); setCatalogAccessBlocked(false); }
   async function importRea(event: FormEvent) {
     event.preventDefault();
     if (busy || reaSubmitting.current || demo || !signedIn || sessionLost || !reaConfirmed || !reaFile) return;
     if (reaFile.size > 1024 * 1024) { setError("O JSON deve ter no máximo 1 MiB. Reduza o artefato localmente antes de importar."); return; }
+    const request = accessRequests.begin();
+    if (!request.isCurrent()) return;
     const contextVersion = reaAttempts.current.captureContext();
-    reaSubmitting.current = true;
-    setBusy(true); setError("");
-    try {
+    reaSubmitting.current = true; setBusy(true); setError("");
+    await applyWorkbenchRequest(request, async current => {
       let evidence: string, bytes: ArrayBuffer;
       try {
-        bytes = await reaFile.arrayBuffer();
+        bytes = await reaFile.arrayBuffer(); current.assertCurrent();
         evidence = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
-      } catch { throw new Error("O JSON precisa usar UTF-8 válido. Confira o arquivo localmente antes de importar."); }
-      const digest = await crypto.subtle.digest("SHA-256", bytes);
+      } catch (cause) {
+        current.assertCurrent();
+        throw cause instanceof Error && cause.name === "AbortError" ? cause : new Error("O JSON precisa usar UTF-8 válido. Confira o arquivo localmente antes de importar.");
+      }
+      const digest = await crypto.subtle.digest("SHA-256", bytes); current.assertCurrent();
       const reportDigest = [...new Uint8Array(digest)].map(value => value.toString(16).padStart(2, "0")).join("");
       const requestId = reaAttempts.current.resolve({ projectId, commitSha: revision, reportDigest, contextVersion });
-      if (!requestId) { setError("A seleção mudou. Confira projeto, commit e arquivo antes de importar novamente."); return; }
-      const result = await api<{ run: Run }>({ projectId, revision, requestId, evidence }, csrfToken, undefined, "/api/workbench/rea");
-      reaAttempts.current.resetAfterSuccess({ id: requestId });
-      go("/runs/" + encodeURIComponent(result.run.id));
-    } catch (cause) { handleFailure(cause); setNotice("Confira o histórico antes de repetir a importação."); }
-    finally { reaSubmitting.current = false; setBusy(false); }
+      if (!requestId) throw new Error("A seleção mudou. Confira projeto, commit e arquivo antes de importar novamente.");
+      const result = await api<{ run: Run }>({ projectId, revision, requestId, evidence }, csrfToken, current.signal, "/api/workbench/rea");
+      return { result, requestId };
+    }, {
+      success({ result, requestId }) { reaAttempts.current.resetAfterSuccess({ id: requestId }); go("/runs/" + encodeURIComponent(result.run.id)); },
+      failure(cause) { handleFailure(cause); if (request.isCurrent()) setNotice("Confira o histórico antes de repetir a importação."); },
+      settled() { reaSubmitting.current = false; setBusy(false); },
+    });
   }
-  async function inspectRepo(event: FormEvent) { event.preventDefault(); setBusy(true); setError(""); try { setIdentity(demo ? { repo: demoProject.repo, id: 100, branch: "main" } : (await api<{ repository: { repo: string; id: number; branch: string } }>({ action: "inspect", repo }, csrfToken)).repository); setConfirmed(false); } catch (cause) { handleFailure(cause); } finally { setBusy(false); } }
-  async function authorize() { if (!identity || !confirmed) return; setBusy(true); setError(""); try { if (demo) { setNotice("Projeto fictício conferido. Nenhuma autorização real foi registrada."); setModal(null); } else { await api({ action: "authorize", repo: identity.repo, repositoryId: identity.id, confirmed: true }, csrfToken); go("/projects"); } } catch (cause) { handleFailure(cause); } finally { setBusy(false); } }
+  async function inspectRepo(event: FormEvent) {
+    event.preventDefault(); const request = accessRequests.begin(); if (!request.isCurrent()) return;
+    setBusy(true); setError("");
+    await applyWorkbenchRequest(request, async current => demo ? { repo: demoProject.repo, id: 100, branch: "main" } : (await api<{ repository: { repo: string; id: number; branch: string } }>({ action: "inspect", repo }, csrfToken, current.signal)).repository, {
+      success(result) { setIdentity(result); setConfirmed(false); }, failure: handleFailure, settled: () => setBusy(false),
+    });
+  }
+  async function authorize() {
+    if (!identity || !confirmed) return;
+    const request = accessRequests.begin(); if (!request.isCurrent()) return;
+    setBusy(true); setError("");
+    await applyWorkbenchRequest(request, current => demo ? null : api({ action: "authorize", repo: identity.repo, repositoryId: identity.id, confirmed: true }, csrfToken, current.signal), {
+      success() { if (demo) { setNotice("Projeto fictício conferido. Nenhuma autorização real foi registrada."); setModal(null); } else go("/projects"); }, failure: handleFailure, settled: () => setBusy(false),
+    });
+  }
   async function scan(event: FormEvent) {
-    event.preventDefault(); setBusy(true); setError("");
-    try { if (!demo && projects.some(project => project.id === projectId && (project.source === "github-app" || project.installation_id))) throw new Error("Use o catálogo GitHub para revalidar este repositório e solicitar sua análise por job."); let run: Run; if (demo) { run = { ...demoRun, id: "example-" + crypto.randomUUID(), created_at: new Date().toISOString(), revision: advanced ? revision.toLowerCase() : demoRun.revision }; if (!updateDemoRuns(current => [run, ...current], true)) throw new Error("O armazenamento da sessão do navegador está indisponível. A nova análise fictícia precisa dele para continuar acessível após a navegação; use as análises de exemplo existentes."); } else { run = (await api<{ run: Run }>({ action: "scan", projectId, requestId: crypto.randomUUID(), revision: advanced ? revision : null }, csrfToken)).run; } go("/runs/" + encodeURIComponent(run.id)); }
-    catch (cause) { handleFailure(cause); setNotice("Confira o histórico antes de iniciar outra análise; uma falha de rede não garante que a solicitação foi interrompida."); }
-    finally { setBusy(false); }
+    event.preventDefault(); const request = accessRequests.begin(); if (!request.isCurrent()) return;
+    setBusy(true); setError("");
+    await applyWorkbenchRequest(request, async current => {
+      if (!demo && projects.some(project => project.id === projectId && (project.source === "github-app" || project.installation_id))) throw new Error("Use o catálogo GitHub para revalidar este repositório e solicitar sua análise por job.");
+      if (!demo) return (await api<{ run: Run }>({ action: "scan", projectId, requestId: crypto.randomUUID(), revision: advanced ? revision : null }, csrfToken, current.signal)).run;
+      const run = { ...demoRun, id: "example-" + crypto.randomUUID(), created_at: new Date().toISOString(), revision: advanced ? revision.toLowerCase() : demoRun.revision };
+      if (!updateDemoRuns(runs => [run, ...runs], true)) throw new Error("O armazenamento da sessão do navegador está indisponível. A nova análise fictícia precisa dele para continuar acessível após a navegação; use as análises de exemplo existentes.");
+      return run;
+    }, {
+      success: run => go("/runs/" + encodeURIComponent(run.id)),
+      failure(cause) { handleFailure(cause); if (request.isCurrent()) setNotice("Confira o histórico antes de iniciar outra análise; uma falha de rede não garante que a solicitação foi interrompida."); },
+      settled: () => setBusy(false),
+    });
   }
   async function review(item: Finding, decision: string) {
-    if (!selected) return; setBusy(true); setError(""); let demoPersisted = true;
-    try { if (demo) { demoPersisted = updateDemoRuns(current => current.map(run => run.id === selected.id ? { ...run, findings: run.findings?.map(finding => finding.fingerprint === item.fingerprint ? { ...finding, status: decision } : finding) } : run)); } else { const result = await api<{ run: Run }>({ action: "review", runId: selected.id, fingerprint: item.fingerprint, decision }, csrfToken); setSelected(result.run); } setNotice(demo ? demoPersisted ? "Revisão fictícia mantida nesta sessão do navegador. Nada foi gravado no servidor." : "Armazenamento indisponível: a revisão fictícia vale somente nesta tela e será perdida ao navegar ou recarregar. Nada foi gravado no servidor." : "Revisão registrada no servidor. Recarregue esta URL para conferir a persistência."); }
-    catch (cause) { handleFailure(cause); } finally { setBusy(false); }
+    if (!selected) return;
+    const request = accessRequests.begin(); if (!request.isCurrent()) return;
+    setBusy(true); setError("");
+    await applyWorkbenchRequest(request, async current => {
+      if (!demo) return { run: (await api<{ run: Run }>({ action: "review", runId: selected.id, fingerprint: item.fingerprint, decision }, csrfToken, current.signal)).run, persisted: true };
+      const persisted = updateDemoRuns(runs => runs.map(run => run.id === selected.id ? { ...run, findings: run.findings?.map(finding => finding.fingerprint === item.fingerprint ? { ...finding, status: decision } : finding) } : run));
+      return { run: null, persisted };
+    }, {
+      success({ run, persisted }) { if (run) setSelected(run); setNotice(demo ? persisted ? "Revisão fictícia mantida nesta sessão do navegador. Nada foi gravado no servidor." : "Armazenamento indisponível: a revisão fictícia vale somente nesta tela e será perdida ao navegar ou recarregar. Nada foi gravado no servidor." : "Revisão registrada no servidor. Recarregue esta URL para conferir a persistência."); },
+      failure: handleFailure, settled: () => setBusy(false),
+    });
   }
-  async function exportReport(run: Run) { setBusy(true); setError(""); try { const result = demo ? { filename: "exemplo-security-workbench.md", markdown: demoReport(run) } : await api<{ filename: string; markdown: string }>({ action: "report", runId: run.id }, csrfToken); download(result.markdown, result.filename); setNotice("Download solicitado. Confira o arquivo Markdown na pasta de downloads do navegador."); } catch (cause) { handleFailure(cause); } finally { setBusy(false); } }
+  async function exportReport(run: Run) {
+    const request = accessRequests.begin(); if (!request.isCurrent()) return;
+    setBusy(true); setError("");
+    await exportWorkbenchReport(request, current => demo ? { filename: "exemplo-security-workbench.md", markdown: demoReport(run) } : api<{ filename: string; markdown: string }>({ action: "report", runId: run.id }, csrfToken, current.signal), {
+      download, notice: () => setNotice("Download solicitado. Confira o arquivo Markdown na pasta de downloads do navegador."), failure: handleFailure, settled: () => setBusy(false),
+    });
+  }
   async function compare(event: FormEvent) {
-    event.preventDefault(); setBusy(true); setError(""); setComparison(null);
-    try { const left = comparableRuns.find(run => run.id === before), right = comparableRuns.find(run => run.id === after); if (!left || !right || left.id === right.id || left.project_id !== right.project_id || (left.source || "github-public") !== (right.source || "github-public")) throw new Error("Escolha duas análises concluídas diferentes do mesmo projeto e método."); const result = demo ? (() => { const old = new Set(left.findings?.map(item => item.fingerprint)), current = new Set(right.findings?.map(item => item.fingerprint)); return { new: [...current].filter(item => !old.has(item)), no_longer_detected: [...old].filter(item => !current.has(item)), still_detected: [...current].filter(item => old.has(item)), partial: left.partial || right.partial }; })() : (await api<{ comparison: Comparison }>({ action: "compare", before, after }, csrfToken)).comparison; setComparison(result); window.history.replaceState(null, "", href("/compare", { before, after })); } catch (cause) { handleFailure(cause); } finally { setBusy(false); }
+    event.preventDefault(); const request = accessRequests.begin(); if (!request.isCurrent()) return;
+    setBusy(true); setError(""); setComparison(null);
+    await applyWorkbenchRequest(request, async currentRequest => {
+      const left = comparableRuns.find(run => run.id === before), right = comparableRuns.find(run => run.id === after);
+      if (!left || !right || left.id === right.id || left.project_id !== right.project_id || (left.source || "github-public") !== (right.source || "github-public")) throw new Error("Escolha duas análises concluídas diferentes do mesmo projeto e método.");
+      if (!demo) return (await api<{ comparison: Comparison }>({ action: "compare", before, after }, csrfToken, currentRequest.signal)).comparison;
+      const old = new Set(left.findings?.map(item => item.fingerprint)), current = new Set(right.findings?.map(item => item.fingerprint));
+      return { new: [...current].filter(item => !old.has(item)), no_longer_detected: [...old].filter(item => !current.has(item)), still_detected: [...current].filter(item => old.has(item)), partial: left.partial || right.partial };
+    }, {
+      success(result) { setComparison(result); window.history.replaceState(null, "", href("/compare", { before, after })); }, failure: handleFailure, settled: () => setBusy(false),
+    });
   }
-  const close = () => { if (!busy) { reaAttempts.current.invalidate(); setModal(null); } };
+  const close = () => { if (!busy && !catalogBusy) { catalogNavigation.current = () => false; reaAttempts.current.invalidate(); setModal(null); } };
   const currentNav = initialView === "detail" ? "runs" : initialView;
   const currentLabel = initialView === "detail" ? "Revisão da análise" : initialView === "onboarding" ? "Primeiros passos" : navigation.find(item => item.id === currentNav)?.label || "Workbench";
   const reportRun = demo ? demoRuns.find(run => run.id === filters.run) : null;
-  const reportContent = reportRun ? { filename: "exemplo-security-workbench.md", markdown: demoReport(reportRun) } : sessionLost ? null : report;
+  const reportContent = reportRun ? { filename: "exemplo-security-workbench.md", markdown: demoReport(reportRun), isCurrent: () => true } : sessionLost ? null : report;
   return <div className="app-shell"><a href="#main" className="skip-link">Pular para conteúdo</a>
     <aside className="sidebar"><div className="mobile-brand"><a target="_top" className="brand" href={href("/dashboard")} aria-label="Security Workbench — visão geral"><span className="brand-mark"><Shield size={23} /></span><span>Security<br /><b>Workbench</b></span></a><button ref={mobileMenuTrigger} className="mobile-menu icon-button" aria-expanded={mobileMenu} aria-controls="workspace-navigation" aria-label={mobileMenu ? "Fechar navegação" : "Abrir navegação"} onClick={() => setMobileMenu(value => !value)}>{mobileMenu ? <X size={22} /> : <Menu size={22} />}</button></div><p className="sidebar-label">ÁREA DE TRABALHO</p><nav id="workspace-navigation" className={mobileMenu ? "is-open" : ""} aria-label="Principal">{navigation.map(item => <a target="_top" key={item.id} className={"nav-item " + (currentNav === item.id ? "active" : "")} aria-current={currentNav === item.id ? "page" : undefined} href={href("/" + item.id)}><item.icon size={19} aria-hidden="true" />{item.label}{item.id === "projects" && projects.length > 0 && <span className="nav-count">{projects.length}</span>}</a>)}</nav><div className="sidebar-footer"><LockKeyhole size={17} /><div><strong>{signedIn && !demo ? "Espaço pessoal" : "Exemplo público"}</strong><small>{signedIn && !demo ? "Dados da sua conta" : "Dados fictícios"}</small></div></div></aside>
-    <div className="workspace"><header className="topbar"><nav className="breadcrumb" aria-label="Localização"><a target="_top" href={href("/dashboard")}>Workbench</a><ChevronRight size={13} aria-hidden="true" /><strong aria-current="page">{currentLabel}</strong></nav><a target="_top" className="user" href={href("/profile")}><span>{signedIn && !demo ? name : "Demonstração"}</span><span className="avatar" aria-hidden="true">{signedIn && !demo ? name.slice(0, 1) : "D"}</span></a></header>
+    <div className="workspace"><header className="topbar"><nav className="breadcrumb" aria-label="Localização"><a target="_top" href={href("/dashboard")}>Workbench</a><ChevronRight size={13} aria-hidden="true" /><strong aria-current="page">{currentLabel}</strong></nav><GitHubSessionStatus initialSession={initialSession} demo={demo} githubReady={githubReady} sessionLost={sessionLost} csrfToken={csrfToken} onSessionLost={handleSessionLost} /></header>
       {demo && <div className="demo-banner"><span><strong>Demonstração</strong> · Dados fictícios guardados apenas nesta sessão do navegador. Nenhum repositório é analisado.</span>{signedIn ? <a target="_top" href="/dashboard">Voltar à operação real</a> : <a target="_top" href="/access">Entrar como proprietário</a>}</div>}
       <main id="main" className="main-content" tabIndex={-1}>{error && !modal && <ErrorBox message={error} />}{notice && !modal && <div className="notice success" role="status"><CheckCircle2 size={18} /><span>{notice}</span><button className="icon-button" onClick={() => setNotice("")} aria-label="Dispensar aviso"><X size={14} /></button></div>}
         {(!signedIn || sessionLost) && <div className="login-note"><LockKeyhole size={20} /><div><strong>{sessionLost ? "Entre novamente para continuar" : "A demonstração é pública. Seus projetos reais exigem GitHub."}</strong><p>A operação real depende da autorização de acesso no servidor.</p></div><a className="button primary" target="_top" href="/access">Entrar com GitHub<ArrowRight size={16} /></a></div>}
         {loading && <p className="loading" role="status">Carregando projetos e histórico da sua conta…</p>}{accessRestricted && !demo && !sessionLost && <p className="notice" role="status">Parte do histórico não está disponível porque o acesso atual a repositórios da GitHub App não foi confirmado. Uma lista reduzida não significa ausência de projetos ou análises.</p>}
-        {initialView === "repositories" && <GitHubCatalogController call={catalogCall} demo={demo} sessionUnavailable={sessionLost} initialJob={initialFilters.job || ""} onUnauthorized={handleFailure} />}
+        {initialView === "repositories" && (catalogAccessBlocked && !sessionLost ? <section className="panel"><div className="section-heading"><div><h1>Acesso ao catálogo interrompido</h1><p>O acesso a um repositório ou à solicitação não foi confirmado. As listas anteriores foram retiradas. Nenhuma análise foi solicitada novamente.</p></div><button className="button secondary" onClick={retryCatalog}>Revalidar acesso aos repositórios</button></div></section> : <GitHubCatalogController call={catalogCall} captureAccess={accessRequests.capture} demo={demo} sessionUnavailable={sessionLost} initialJob={initialFilters.job || ""} onUnauthorized={handleFailure} />)}
         {initialView === "dashboard" && <><div className="page-heading"><div><p className="eyebrow">EVIDÊNCIA E DECISÃO HUMANA</p><h1>Visão geral</h1><p>Retome seu projeto, confira a cobertura e revise as detecções.</p></div><button className="button primary" disabled={busy || sessionLost || loading} onClick={() => openScan()}><Plus size={18} />Nova análise</button></div><section className="panel"><FiltersForm path="/dashboard" demo={demo} filters={filters} projects={projects} state={false} /></section><div className="summary-line"><div><b>{loading || listUnavailable ? "—" : projects.filter(project => !filters.project || project.id === filters.project).length}</b><span>projetos cadastrados</span></div><div><b>{loading || listUnavailable ? "—" : dashboardRuns.filter(run => run.status === "complete").length}</b><span>análises concluídas na seleção</span></div><div><b>{loading || listUnavailable ? "—" : totalDetections}</b><span>detecções no histórico carregado</span></div><span className="summary-note"><Shield size={16} />Revisão humana obrigatória</span></div>
           <section className="panel"><div className="section-heading"><div><h2>Decisões no histórico amostrado</h2><p>Até 20 análises concluídas e 500 detecções, mesmo quando anteriores às 100 execuções da listagem. Uma detecção em dois commits conta duas vezes. Não são vulnerabilidades únicas ou correções verificadas.</p></div><a target="_top" className="text-button" href={href("/findings")}>Ver achados<ArrowRight size={15} /></a></div>{aggregateError ? <ErrorBox message={aggregateError} /> : <div className="decision-metrics">{Object.entries(decisions).map(([decision, label]) => <div key={decision}><b>{aggregateReady && !loading && !listUnavailable ? dashboardFindings.filter(finding => finding.status === decision).length : "—"}</b><span>{label}</span></div>)}</div>}{!aggregateReady && !aggregateError && !sessionLost && <p className="data-note" role="status">Carregando decisões registradas…</p>}{aggregate?.truncated && <p className="data-note">Contagem parcial: o limite da consulta foi atingido. Abra análises individuais para conferir o restante.</p>}</section>
           {!projects.length && !loading && !listUnavailable && !accessRestricted ? <section className="panel empty"><h2>Comece pelo código que você controla</h2><p>Confira o acesso ao repositório e a identidade antes de confirmar uma análise.</p><div className="button-row">{demo ? <button className="button primary" onClick={openProject} disabled={sessionLost}>Adicionar projeto</button> : <a target="_top" className="button primary" href={href("/repositories")}>Encontrar repositórios<ArrowRight size={16} /></a>}<a target="_top" className="button secondary" href={href("/onboarding")}>Primeiros passos</a></div></section> : projects[0] && <section className="project-focus"><span className="focus-icon"><FolderGit2 size={30} /></span><div className="grow"><p className="eyebrow">RETOME SEU PROJETO</p><h2>{projects[0].repo.split("/")[1]}</h2><p>{projects[0].repo}</p></div><button className="button primary" onClick={() => openScan(projects[0].id)} disabled={busy || sessionLost}>Analisar versão<ArrowRight size={16} /></button></section>}
@@ -319,11 +411,15 @@ export default function Workbench({ signedIn, name, githubReady = false, csrfTok
         </>}</>}
 
         {initialView === "compare" && <><div className="page-heading"><div><p className="eyebrow">MESMO PROJETO, VERSÕES EXPLÍCITAS</p><h1>Comparar análises</h1><p>Escolha duas execuções concluídas do mesmo projeto e método. IDs explícitos da URL também são consultados quando estiverem fora do histórico carregado.</p></div></div><section className="panel comparison-panel"><form onSubmit={compare}><label className="field">Análise de referência<select required value={before} onChange={event => { setBefore(event.target.value); setComparison(null); }}><option value="">Escolha a análise anterior</option>{comparableRuns.filter(run => run.id !== after && (!after || (run.project_id === comparableRuns.find(item => item.id === after)?.project_id && (run.source || "github-public") === (comparableRuns.find(item => item.id === after)?.source || "github-public")))).map(run => <option key={run.id} value={run.id}>{run.repo} · {sourceLabel(run, demo)} · {date(run.created_at)} · {run.revision?.slice(0, 12)}</option>)}</select></label><label className="field">Análise a comparar<select required value={after} onChange={event => { const next = event.target.value; setAfter(next); if (before === next || comparableRuns.find(run => run.id === before)?.project_id !== comparableRuns.find(run => run.id === next)?.project_id || (comparableRuns.find(run => run.id === before)?.source || "github-public") !== (comparableRuns.find(run => run.id === next)?.source || "github-public")) setBefore(""); setComparison(null); }}><option value="">Escolha a outra análise</option>{comparableRuns.map(run => <option key={run.id} value={run.id}>{run.repo} · {sourceLabel(run, demo)} · {date(run.created_at)} · {run.revision?.slice(0, 12)}</option>)}</select></label><button className="button primary" disabled={busy || !before || !after || sessionLost}>{busy ? "Comparando…" : "Comparar versões"}</button></form>{comparableRuns.length < 2 && !loading && !listUnavailable && <p className="data-note">É necessário concluir pelo menos duas análises do mesmo projeto e método.</p>}{comparison && <div className="comparison" role="status"><div><b>{comparison.new.length}</b><span>novas detecções</span></div><div><b>{comparison.no_longer_detected.length}</b><span>não detectadas agora</span></div><div><b>{comparison.still_detected.length}</b><span>continuam detectadas</span></div><p>Não detectar novamente não comprova correção.{comparison.partial ? " Uma das análises possui cobertura parcial." : ""}</p></div>}</section></>}
-        {initialView === "reports" && <><div className="page-heading"><div><p className="eyebrow">RELATÓRIO COM LIMITES E DECISÕES</p><h1>Relatórios</h1><p>O Markdown é gerado com o estado atual da revisão; não transforma candidatos em vulnerabilidades confirmadas.</p></div></div>{filters.run ? <><a target="_top" className="text-button back" href={href("/reports")}><ArrowLeft size={16} />Escolher outra análise</a><section className="panel report-panel">{reportContent ? <><div className="section-heading"><div><h2>Prévia Markdown</h2><p>{reportContent.filename}</p></div><button className="button primary" onClick={() => { download(reportContent.markdown, reportContent.filename); setNotice("Download solicitado. Confira o arquivo no navegador."); }}><Download size={16} />Baixar Markdown</button></div><pre className="markdown-preview" tabIndex={0} aria-label="Conteúdo do relatório Markdown">{reportContent.markdown}</pre></> : <Empty title={error || demo ? "Relatório indisponível" : "Gerando prévia…"}><p>Escolha uma análise concluída à qual sua sessão tenha acesso.</p></Empty>}</section></> : <section className="panel"><FiltersForm path="/reports" demo={demo} filters={filters} projects={projects} state={false} /><WorkbenchListState loading={loading} unavailable={listUnavailable} retry={!demo && !sessionLost ? refresh : undefined}><RunsTable items={filteredRuns.filter(run => run.status === "complete")} href={href} report restricted={accessRestricted} /></WorkbenchListState></section>}</>}
+        {initialView === "reports" && <><div className="page-heading"><div><p className="eyebrow">RELATÓRIO COM LIMITES E DECISÕES</p><h1>Relatórios</h1><p>O Markdown é gerado com o estado atual da revisão; não transforma candidatos em vulnerabilidades confirmadas.</p></div></div>{filters.run ? <><a target="_top" className="text-button back" href={href("/reports")}><ArrowLeft size={16} />Escolher outra análise</a><section className="panel report-panel">{reportContent ? <><div className="section-heading"><div><h2>Prévia Markdown</h2><p>{reportContent.filename}</p></div><button className="button primary" onClick={() => { if (!reportContent.isCurrent()) return; download(reportContent.markdown, reportContent.filename); if (reportContent.isCurrent()) setNotice("Download solicitado. Confira o arquivo no navegador."); }}><Download size={16} />Baixar Markdown</button></div><pre className="markdown-preview" tabIndex={0} aria-label="Conteúdo do relatório Markdown">{reportContent.markdown}</pre></> : <Empty title={error || demo ? "Relatório indisponível" : "Gerando prévia…"}><p>Escolha uma análise concluída à qual sua sessão tenha acesso.</p></Empty>}</section></> : <section className="panel"><FiltersForm path="/reports" demo={demo} filters={filters} projects={projects} state={false} /><WorkbenchListState loading={loading} unavailable={listUnavailable} retry={!demo && !sessionLost ? refresh : undefined}><RunsTable items={filteredRuns.filter(run => run.status === "complete")} href={href} report restricted={accessRestricted} /></WorkbenchListState></section>}</>}
         {["profile", "account", "help", "onboarding"].includes(initialView) && <OperationalInfo view={initialView as "profile" | "account" | "help" | "onboarding"} signedIn={signedIn && !sessionLost} name={name} githubReady={githubReady} csrfToken={csrfToken} projectCount={!demo && (loading || listUnavailable) ? null : projects.length} demo={demo} onAddProject={openProject} onShowDemo={showDemo} />}
         <footer className="page-footer"><span>Security Workbench / Experimental</span><span><LockKeyhole size={12} />Escopo autorizado. Evidência antes de decisão.</span></footer>
       </main>
     </div>
+    {modal === "catalog" && <Modal title="Nova análise · repositórios GitHub" onClose={close} busy={busy || catalogBusy} wide>
+      <p className="modal-description">Escolha um repositório do GitHub conectado, mesmo que ainda não seja um projeto no Workbench. Listar e selecionar não inicia uma análise.</p>
+      <GitHubCatalogController call={catalogCall} captureAccess={accessRequests.capture} demo={demo} sessionUnavailable={sessionLost} onUnauthorized={handleFailure} embedded onBusyChange={setCatalogBusy} onJobCreated={job => { if (catalogNavigation.current()) go("/repositories", { job: job.id }); }} />
+    </Modal>}
     {modal === "project" && <Modal title={identity ? "Confirme o escopo" : "Adicionar projeto"} onClose={close} busy={busy}>{error && <ErrorBox message={error} />}<p className="modal-description">{demo ? "Este fluxo usa sempre o mesmo repositório fictício. Nenhum link informado é consultado." : "Adicione um repositório público seu. A identidade será conferida antes do cadastro."}</p>{!identity ? <form onSubmit={inspectRepo}><label className="field">Link ou nome do repositório<input autoFocus required maxLength={250} value={repo} onChange={event => setRepo(event.target.value)} placeholder="https://github.com/ofelipepeixoto/rea" disabled={busy} /><small>Somente repositórios públicos de ofelipepeixoto nesta versão.</small></label><div className="modal-actions"><button className="button secondary" type="button" disabled={busy} onClick={close}>Cancelar</button><button className="button primary" disabled={busy || sessionLost}>{busy ? "Conferindo…" : "Conferir repositório"}<ArrowRight size={16} /></button></div></form> : <><div className="identity-card"><FolderGit2 size={28} /><div><strong>{identity.repo}</strong><p>Público · branch {identity.branch}</p><small>ID estável {identity.id}</small></div></div><label className="checkbox"><input type="checkbox" checked={confirmed} disabled={busy} onChange={event => setConfirmed(event.target.checked)} /><span>Tenho autorização para analisar este repositório e confirmo a identidade acima. Autorizo somente leitura estática.</span></label><div className="modal-actions"><button className="button secondary" disabled={busy} onClick={() => setIdentity(null)}>Voltar</button><button className="button primary" disabled={busy || !confirmed || sessionLost} onClick={() => void authorize()}>{busy ? "Salvando…" : demo ? "Concluir exemplo" : "Autorizar e adicionar"}<Check size={16} /></button></div></>}</Modal>}
     {modal === "rea" && <Modal title="Importar análise estática REA (local)" onClose={close} busy={busy}>{error && <ErrorBox message={error} />}{demo ? <><p className="modal-description">A importação exige a sessão do proprietário e um projeto real autorizado. A demonstração não envia arquivos nem simula execução do REA.</p><button className="button secondary" onClick={close}>Voltar ao exemplo</button></> : <><p className="modal-description">Importe um JSON produzido localmente e conferido pelo operador. A hospedagem não executa o REA ou o código do alvo. O arquivo bruto não é persistido; os candidatos normalizados seguem para revisão humana.</p>{!projects.length ? <p className="notice">Cadastre um projeto autorizado antes de importar um artefato.</p> : <form onSubmit={importRea}><label className="field">Projeto autorizado<select required value={projectId} disabled={busy} onChange={event => { reaAttempts.current.invalidate(); setProjectId(event.target.value); setReaConfirmed(false); }}>{projects.map(project => <option key={project.id} value={project.id}>{project.repo}</option>)}</select></label><label className="field">Commit declarado<input required pattern="[0-9a-fA-F]{40}" maxLength={40} disabled={busy} value={revision} onChange={event => { reaAttempts.current.invalidate(); setRevision(event.target.value); setReaConfirmed(false); }} placeholder="SHA completo de 40 caracteres" /><small>O vínculo do artefato com esse commit não será verificado pela aquisição GitHub.</small></label><label className="field">Artefato JSON local<input type="file" required accept="application/json,.json" disabled={busy} onChange={event => { reaAttempts.current.invalidate(); setReaFile(event.target.files?.[0] || null); setReaConfirmed(false); }} /><small>Máximo de 1 MiB. Não envie arquivos com credenciais ou conteúdo sensível bruto.</small></label><label className="checkbox"><input type="checkbox" required disabled={busy} checked={reaConfirmed} onChange={event => setReaConfirmed(event.target.checked)} /><span>Conferi a origem e o conteúdo do JSON, tenho autorização para esse projeto e declaro o commit informado. Entendo que a importação é parcial e não verifica esse vínculo.</span></label><div className="modal-actions"><button type="button" className="button secondary" onClick={close} disabled={busy}>Cancelar</button><button className="button primary" disabled={busy || !reaConfirmed || !reaFile || sessionLost}>{busy ? "Importando…" : "Importar para revisão"}</button></div></form>}</>}</Modal>}
     {modal === "scan" && <Modal title={demo ? "Nova análise fictícia" : "Nova análise"} onClose={close} busy={busy}>{error && <ErrorBox message={error} />}<p className="modal-description">{demo ? "O exemplo repete a fixture, sem rede e sem analisar um repositório." : "Escolha um projeto autorizado. A versão atual é fixada em um commit antes da leitura."}</p><form onSubmit={scan}><label className="field">Projeto<select required disabled={busy} value={projectId} onChange={event => setProjectId(event.target.value)}>{projects.filter(project => demo || (!project.installation_id && project.source !== "github-app")).map(project => <option key={project.id} value={project.id}>{project.repo}</option>)}</select></label><div className="version-choice"><GitBranch size={20} /><div><strong>{advanced ? "Commit específico" : "Versão atual do projeto"}</strong><p>{advanced ? "Use o SHA completo para repetir uma análise." : "O commit efetivo ficará registrado no resultado."}</p></div></div><label className="checkbox compact"><input type="checkbox" checked={advanced} disabled={busy} onChange={event => setAdvanced(event.target.checked)} /><span>Quero escolher um commit específico</span></label>{advanced && <label className="field">SHA do commit<input required disabled={busy} pattern="[0-9a-fA-F]{40}" maxLength={40} value={revision} onChange={event => setRevision(event.target.value)} placeholder="40 caracteres hexadecimais" /></label>}<div className="scope-note"><Shield size={18} /><p>Até 20 arquivos suportados. Sem execução do alvo. Possíveis credenciais são redigidas.</p></div>{busy && <div className="notice" role="status"><span className="spinner" /><span>Solicitação em andamento. Aguarde e confira o histórico se a conexão falhar.</span></div>}<div className="modal-actions"><button className="button secondary" type="button" disabled={busy} onClick={close}>Cancelar</button><button className="button primary" disabled={busy || sessionLost}>{busy ? "Analisando…" : demo ? "Criar análise fictícia" : "Iniciar análise"}<ArrowRight size={16} /></button></div></form></Modal>}

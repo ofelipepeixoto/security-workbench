@@ -140,3 +140,26 @@
 @media(max-width:1000px){.analysis-context dl{grid-template-columns:repeat(2,minmax(0,1fr))}.outcome-top{flex-wrap:wrap}.outcome-top>.badge{margin-left:63px}}
 @media(max-width:800px){.topbar{height:auto;min-height:60px;padding-top:10px;padding-bottom:10px}.sidebar nav{max-height:none}.finding-heading>.badge{margin-left:0}.finding-heading .grow{flex-basis:calc(100% - 55px)}.review-row{align-items:stretch}.review-choice{flex-basis:100%;max-width:none}.analysis-outcome,.analysis-context,.coverage-body{padding:20px}.analysis-nav{gap:0 16px}.analysis-nav a{font-size:12px}.outcome-top h2{font-size:21px}.outcome-actions .button{flex:1}.outcome-actions .text-button{flex-basis:100%}.coverage-counts{gap:16px}.analysis-coverage .section-heading{flex-wrap:wrap;gap:12px}.details-panel{padding:0 20px}.technical-body dl{grid-template-columns:140px minmax(0,1fr)}.review-row>.button{margin-left:0;align-self:flex-start}}
 @media(max-width:520px){.analysis-context dl{grid-template-columns:1fr;gap:18px}.analysis-context dl>div{padding-bottom:14px;border-bottom:1px solid var(--line)}.analysis-context dl>div:last-child{padding-bottom:0;border-bottom:0}.outcome-top>.badge{margin-left:0}.outcome-top .grow{flex-basis:calc(100% - 63px)}.outcome-actions{align-items:stretch}.outcome-actions .button{flex-basis:100%}.coverage-counts{grid-template-columns:1fr;gap:14px}.coverage-counts>div{display:flex;justify-content:space-between;align-items:baseline;gap:15px}.coverage-counts dd{margin:0;font-size:22px;text-align:right}.coverage-counts dt{max-width:58%}.technical-body dl{grid-template-columns:1fr;gap:5px}.technical-body dd{margin-bottom:13px}.technical-body .dependency-list li{gap:8px}.modal-actions{flex-direction:column-reverse;align-items:stretch}.modal-actions .button{width:100%}.review-row>.button{width:100%;align-self:stretch}.comparison{grid-template-columns:1fr}.finding-heading{padding:17px}.finding-content{padding:18px}.review-section-heading h2 .badge{margin-left:5px}.analysis-heading .text-button{min-height:44px}.page-heading .button-row{gap:10px}.page-heading .button-row>.button{flex:1;min-width:120px}}
+
+.github-session{display:flex;align-items:center;justify-content:flex-end;gap:8px 14px;flex-wrap:wrap;font-size:12px;min-width:0}
+.github-session-status{display:flex;align-items:center;gap:7px;color:#52677a;line-height:1.4}
+.github-session-dot{width:9px;height:9px;border-radius:50%;background:#7d8b98;flex-shrink:0}
+.github-session .github-mark{color:#52677a;flex-shrink:0}
+.github-session--authenticated .github-mark{color:#087f60}
+.github-session--authenticated .github-session-dot{background:#087f60}
+.github-session--authenticated .github-session-status{color:#08634f}
+.github-session-menu{position:relative;min-width:0}
+.github-session-menu summary{display:flex;align-items:center;gap:8px;min-height:44px;padding:6px;cursor:pointer;border-radius:8px;overflow-wrap:anywhere;list-style:none}
+.github-session-menu summary::-webkit-details-marker{display:none}
+.github-session-menu summary:focus-visible,.github-session-action:focus-visible{outline:3px solid #087f76;outline-offset:3px}
+.github-session-options{position:absolute;right:0;top:100%;z-index:30;width:min(300px,calc(100vw - 36px));padding:16px;background:var(--surface,#fff);border:1px solid var(--line);border-radius:12px;box-shadow:0 10px 30px #172c3d24}
+.github-session-options p{margin:0 0 12px;color:var(--muted);font-size:12px;line-height:1.6}
+.github-session-options a,.github-session-options button{display:flex;align-items:center;gap:8px;width:100%;min-height:44px;padding:10px;text-align:left;border-radius:6px;font-size:13px}
+.github-session-options a:hover,.github-session-options button:hover{background:#eef6f5}
+.github-session-action{display:inline-flex;align-items:center;gap:6px;min-height:44px;color:var(--teal,#087f76)}
+.github-session-error{flex-basis:100%;margin:0;color:#a3322f}
+.modal-catalog{width:min(1000px,calc(100vw - 32px));max-width:calc(100vw - 32px);max-height:calc(100dvh - 32px);overflow-y:auto}
+.modal-catalog .catalog-intro{margin:20px 0}
+.modal-catalog .catalog-body{padding:20px}
+.modal-catalog .catalog-connection .section-heading,.modal-catalog .catalog-browser .section-heading{padding:20px}
+@media(max-width:650px){.github-session{max-width:62%;gap:0 8px;font-size:11px}.github-session-status{font-size:10px}.github-session-menu summary{max-width:180px}.modal-catalog{width:calc(100vw - 20px);max-width:calc(100vw - 20px);padding:16px}.modal-catalog .catalog-body{padding:16px}.modal-catalog .catalog-intro h2{font-size:20px}}

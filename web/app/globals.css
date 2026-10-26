@@ -163,3 +163,26 @@
 .modal-catalog .catalog-body{padding:20px}
 .modal-catalog .catalog-connection .section-heading,.modal-catalog .catalog-browser .section-heading{padding:20px}
 @media(max-width:650px){.github-session{max-width:62%;gap:0 8px;font-size:11px}.github-session-status{font-size:10px}.github-session-menu summary{max-width:180px}.modal-catalog{width:calc(100vw - 20px);max-width:calc(100vw - 20px);padding:16px}.modal-catalog .catalog-body{padding:16px}.modal-catalog .catalog-intro h2{font-size:20px}}
+
+/* Automatically generated guidance is separate from evidence and decisions. */
+.automatic-guidance .section-heading{flex-wrap:wrap}
+.automatic-guidance-body{padding:24px;font-size:13px;line-height:1.7}
+.automatic-guidance-body>p{margin-bottom:16px}
+.automatic-guidance-meta{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:20px 0;font-size:12px}
+.automatic-guidance-meta dt{font-weight:650;color:var(--ink)}
+.automatic-guidance-meta dd{margin:4px 0 0;overflow-wrap:anywhere}
+.automatic-guidance-expected{display:block;margin-top:5px;color:var(--muted);font-size:12px}
+.automatic-guidance-counts{display:flex;flex-wrap:wrap;gap:8px 24px;padding-left:20px}
+.automatic-guidance-details>summary{cursor:pointer;min-height:44px;padding:12px 0;font-weight:650;color:var(--ink)}
+.automatic-guidance-item{padding:20px 0;border-top:1px solid var(--line);overflow-wrap:anywhere}
+.automatic-guidance-item h3,.automatic-guidance-item h4{font-size:15px;margin:0 0 12px}
+.automatic-guidance-item p,.automatic-guidance-item ul,.automatic-guidance-item ol{margin:10px 0 16px}
+.automatic-guidance-item li{margin:8px 0;line-height:1.7}
+.automatic-guidance-item>div{margin-top:18px}
+.automatic-guidance-limits{padding:14px;background:#f5f7fa;border-left:3px solid #8193a2}
+.automatic-guidance-model{margin:20px 0 0!important;padding-top:16px;border-top:1px solid var(--line)}
+.automatic-guidance-inline{margin-top:22px;padding-top:18px;border-top:1px solid var(--line);font-size:13px}
+.automatic-guidance-inline .automatic-guidance-item{padding:12px 0 0;border-top:0}
+.automatic-guidance-label{font-weight:650;color:var(--ink)}
+.automatic-guidance-link{display:inline-flex;align-items:center;min-height:44px;text-decoration:underline;color:var(--green)}
+@media(max-width:650px){.automatic-guidance-body{padding:18px}.automatic-guidance-meta{grid-template-columns:1fr;gap:12px}.automatic-guidance-counts{display:block}.automatic-guidance-counts li{margin:8px 0}.automatic-guidance-item ul,.automatic-guidance-item ol{padding-left:22px}}

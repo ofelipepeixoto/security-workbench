@@ -1,4 +1,5 @@
 import * as defaultScanner from './scanner.mjs';
+import {buildReviewGuidance} from './review-advisor.mjs';
 import { parseReaEvidence } from './rea-import.mjs';
 import { isWorkbenchUserAllowed } from './github-auth.mjs';
 import { GitHubAppError } from './github-app-client.mjs';
@@ -135,7 +136,7 @@ export function createWorkbenchService({ db, ownerId, user = { userId: ownerId }
     const result = row.result_json ? JSON.parse(row.result_json) : null;
     const decisions = await all('SELECT fingerprint, decision FROM workbench_reviews WHERE owner_id = ? AND run_id = ?', ownerId, row.id);
     const byFingerprint = new Map(decisions.map(item => [item.fingerprint, item.decision]));
-    return {
+    const run = {
       ...(result ?? {}),
       id: row.id, project_id: row.project_id, repo: row.repo, repository_id: row.repository_id,
       status: row.status, revision: row.revision, created_at: row.created_at,
@@ -148,6 +149,10 @@ export function createWorkbenchService({ db, ownerId, user = { userId: ownerId }
       }),
       dependencies: result?.dependencies ?? [], failure_code: row.failure_code,
     };
+    // The existing owner/project checks precede this projection. Guidance uses
+    // current persisted decisions, adds no read/write/provider call, and never
+    // enters result_json or changes the scanner's bounded acquisition result.
+    return {...run, guidance: buildReviewGuidance(Array.isArray(result?.findings) ? run : {...run, findings: undefined})};
   };
   const expire = async (projectId) => {
     const current = now();

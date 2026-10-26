@@ -413,3 +413,33 @@ revogação hospedada e jornada de exportação continuam pendentes. O código
 revisável não representa piloto homologado ou lançamento público. Não houve
 alteração da lista de contas, dos repositórios permitidos no QA ou de
 credenciais. A App permanece somente leitura e OpenAI permanece desligada.
+
+## Adendo — 26/10/2026: publicação e orientador automático
+
+As duas alterações anteriormente locais foram publicadas em rascunho, mantendo
+as árvores testadas e a cadeia existente. Os heads e as CIs abaixo foram
+reconfirmados em 26/10/2026:
+
+| PR | Base | Head remoto | CI concluída |
+| --- | --- | --- | --- |
+| [#44](https://github.com/ofelipepeixoto/security-workbench/pull/44) — identidade e catálogo | #43 | `414faab6b044791756de1e658ad333627e782b0c` | [40326058256](https://github.com/ofelipepeixoto/security-workbench/actions/runs/40326058256), success |
+| [#45](https://github.com/ofelipepeixoto/security-workbench/pull/45) — Markdown e prompt | #44 | `e071215feb21ed35207e250a7a949b5d8d592d93` | [40326275615](https://github.com/ofelipepeixoto/security-workbench/actions/runs/40326275615), success |
+
+As árvores são, respectivamente, `2413910ed18f382016f04fd7211ceb5f2cb27455`
+e `87cf3a028c26123f1ae076a0cc94ca6cb40b6b78`. Os hashes locais anteriores
+continuam sendo referência da validação local, não os heads públicos.
+Autoria genérica foi definida explicitamente e conferida nos novos heads.
+Nenhum bundle, log bruto ou artefato real foi anexado aos PRs.
+
+O novo [orientador automático](orientador-automatico.md) é um complemento por
+regras versionadas: gera orientações na leitura autorizada e no Markdown,
+sem revisão humana prévia para gerar o texto. A saída é rastreável, mantém
+incertezas e decisões existentes e não aplica código. Não contém provider,
+chave, rede, execução do alvo ou persistência adicional. São no máximo 100
+entradas e 192 KiB por bloco de orientação, com omissões explícitas.
+
+A revisão contextual por modelo não foi executada nem implementada como
+serviço ativo. O orçamento vigente continua zero, e destino/projeto, modelo,
+dados permitidos e credencial protegida precisam ser delimitados antes dessa
+etapa. A orientação por regras não deve ser apresentada como análise por IA.
+A produção v15 e as permissões/recursos existentes não foram alterados.

@@ -1,5 +1,6 @@
 /** Bounded, public GitHub acquisition. Rules/texts ported from Workbench PR #6. */
 import {GitHubAppError} from './github-app-client.mjs';
+import {CORRECTION_PROMPT_VERSION, renderCorrectionPrompt} from './correction-prompt.mjs';
 const OWNER = "ofelipepeixoto";
 const API = "https://api.github.com";
 export const SCANNER_VERSION = "workbench-static/1.1";
@@ -315,6 +316,9 @@ export function renderReport(run) {
     "A importação valida uma projeção estática do JSON fornecido pelo operador. O Workbench não executou o REA, não autenticou seu produtor e não comprovou o isolamento, os bytes dos artefatos ou o vínculo com o commit. Observações estruturais não são vulnerabilidades confirmadas.", "");
   else lines.push(run.source === "github-app" ? "Aquisição GitHub App: interseção entre acesso do usuário e da instalação; até 20 arquivos, 2 MiB e 256 KiB por arquivo. Não executa código do alvo." : "Piloto web: apenas repositórios públicos de ofelipepeixoto; até 20 arquivos, 2 MiB no total e 256 KiB por arquivo. Não executa código do alvo.", "");
   if (run.engine_version) lines.push(`Motor: ${markdown(run.engine_version)} · política: ${markdown(run.coverage?.policy)}`, "Cobertura de advisories/CVEs: indisponível; inventário não é correlação de vulnerabilidades.", "");
+  lines.push("## Como interpretar a revisão", "",
+    "Os sinais do motor começam como candidatos para revisão humana. candidate indica revisão pendente; confirmed registra uma confirmação humana, sem provar exploração; false_positive registra falso positivo; accepted_risk registra uma decisão humana de aceitar o risco. O relatório preserva o estado atual e não aplica correções.",
+    "Confira o código e o contexto antes de decidir. Regras textuais, inventário e observações estruturais têm cobertura limitada; não equivalem a pentest ou auditoria abrangente. Valores de possíveis segredos devem permanecer mascarados.", "");
   lines.push("## Achados", "");
   if (!run.findings?.length) lines.push("Nenhum candidato nos arquivos lidos.");
   for (const item of run.findings || []) lines.push(`### ${markdown(item.kind)} · ${markdown(item.fingerprint)}`, "", `Local: ${markdown(item.path)}:${markdown(item.line)} · estado: ${markdown(item.status)} · confiança: ${markdown(item.confidence)}`, "", `Regra: ${markdown(item.rule_id || "não registrada")} · severidade potencial: ${markdown(item.severity || "não registrada")}`, `Justificativa: ${markdown(item.severity_reason || "não registrada")}`, "", `Evidência: ${markdown(item.evidence)}`, "", `Impacto possível: ${markdown(item.impact)}`, "", `Recomendação: ${markdown(item.recommendation)}`, "");
@@ -322,5 +326,9 @@ export function renderReport(run) {
   if (!run.dependencies?.length) lines.push("Nenhuma dependência reconhecida nos manifestos suportados.");
   for (const item of run.dependencies || []) lines.push(`- ${markdown(item.name)} ${markdown(item.version)} (${markdown(item.source)})`);
   if (run.omissions?.length) {lines.push("", "## Limitações de leitura", ""); for (const item of run.omissions) lines.push(`- ${markdown(item)}`);}
+  lines.push("", "## Prompt portátil para revisão e proposta de correção", "",
+    `Contrato: ${CORRECTION_PROMPT_VERSION}. Copie o bloco abaixo junto com este relatório para uma IA de sua escolha somente depois de revisar o que deseja compartilhar. O Workbench apenas monta este texto; nenhuma IA é chamada. Não envie código privado ou dados sensíveis sem autorização.`, "",
+    "```text", renderCorrectionPrompt(), "```", "",
+    "Este relatório e o prompt não geram ou aplicam patches automaticamente. A proposta precisa de contexto atual, testes e revisão humana.");
   return lines.join("\n") + "\n";
 }

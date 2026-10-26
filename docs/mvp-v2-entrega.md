@@ -367,3 +367,49 @@ Head anterior ao adendo `76f5e7031e94abbbe14f1874bd3dbb483b75074a`:
 [CI 39721269070](https://github.com/ofelipepeixoto/security-workbench/actions/runs/39721269070)
 **4/4 aprovados**. Nenhum teste de implementação foi refeito neste adendo
 documental. [Evidências, limites e bloqueios](qa-execucao-2026-10-22.md).
+
+## Adendo — 26/10/2026: identidade, catálogo e revisão portátil
+
+O estado público foi reconfirmado antes desta alteração: PR #43 em rascunho,
+head `71c878533270022aa68748f73b3f9f6a6f2727db`, base da #42
+`8ec2e154d8f317196908d18c4df0f318db20cbf1`. A
+[CI 40237040753](https://github.com/ofelipepeixoto/security-workbench/actions/runs/40237040753),
+do head da #43, está concluída com `success`; esse estado foi relido em
+26/10. Não é CI dos novos ajustes locais.
+
+O head hospedado citado no adendo anterior é um registro histórico. A entrega
+privada de código de 25/10 registra o candidato da #43 nos Workers QA;
+nesta etapa não houve upload, deploy, leitura de módulos remotos, migration,
+ativação de janela, cron ou consumer. Nenhuma configuração da produção v15
+foi alterada.
+
+Dois ajustes dependentes foram preparados para revisão, sem publicação:
+
+1. Identidade/sessão e catálogo, commit local
+   `7224d774eb742a6aa1623864e09844d1f779c5be`: marca GitHub e verde condicionado
+   à sessão validada, expiração e retomada, catálogo paginado na nova análise,
+   acompanhamento por URL e bloqueio de respostas antigas após perda de acesso.
+   A montagem abre o escopo antes dos efeitos filhos, preservando o fechamento
+   e a reabertura do StrictMode. [Contrato e limites](github-session-catalog-2026-10-26.md).
+2. Relatório com estados humanos explicados e prompt offline para uma IA do
+   usuário propor correções. O prompt não executa o repositório, altera o
+   GitHub ou chama modelos. [Motor atual e proposta de evolução](motor-de-revisao-e-correcao.md).
+
+Validação local: **319 testes Node** no primeiro commit; **324 testes Node**
+no conjunto dos dois ajustes, além de **27 testes Python**, TypeScript, lint
+e build. Transporte, contas e respostas são sintéticos; os testes exercitam
+módulos reais, SQLite em memória e renderização no servidor. A exportação
+foi gerada pela rota real com fixture local e o arquivo foi reaberto no disco;
+isso não equivale a download de navegador ou integração hospedada.
+
+A revisão independente encerrou os casos de exportação tardia após troca de
+sessão e invalidação prematura na montagem do catálogo. Não encontrou outro
+P0/P1 no recorte. A tentativa de preview ficou bloqueada por
+`ERR_CONNECTION_REFUSED` entre navegador e servidor local; não é evidência de
+falha do produto nem aprovação de DOM, mobile, teclado ou StrictMode real.
+
+CI nova, login A/B no novo build, instalações/permissões reais, processamento,
+revogação hospedada e jornada de exportação continuam pendentes. O código
+revisável não representa piloto homologado ou lançamento público. Não houve
+alteração da lista de contas, dos repositórios permitidos no QA ou de
+credenciais. A App permanece somente leitura e OpenAI permanece desligada.

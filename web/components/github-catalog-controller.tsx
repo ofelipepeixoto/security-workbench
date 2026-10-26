@@ -69,6 +69,14 @@ export function mergeCatalogPage<T extends { id: number }>(previous: CatalogPage
 }
 export function failedCatalogPage<T>(previous: CatalogPage<T>): CatalogPage<T> { return { ...previous, state: "error", complete: false }; }
 
+/** Selection is a local projection of an already-authorized metadata page.
+ * It never resolves a commit or grants the independent execution capability. */
+export function createCatalogMetadataSelection(repository: CatalogRepository, repositories: CatalogPage<CatalogRepository>, installationId: number | null): CatalogSelection | null {
+  if (repositories.state !== "loaded" || !installationId) return null;
+  const listed = repositories.items.find(item => item.id === repository.id && item.full_name === repository.full_name && item.installation_id === installationId);
+  return listed ? { repository: listed, revisionInput: "", confirmed: false, prepared: null } : null;
+}
+
 type Props = { call: CatalogCall; demo: boolean; sessionUnavailable: boolean; initialJob?: string; onUnauthorized: (error: unknown) => void;
   embedded?: boolean; onJobCreated?: (job: CatalogJob) => void; onBusyChange?: (busy: boolean) => void; captureAccess?: () => () => boolean };
 export function GitHubCatalogController({ call, demo, sessionUnavailable, initialJob = "", onUnauthorized, embedded = false, onJobCreated, onBusyChange, captureAccess }: Props) {
@@ -200,10 +208,13 @@ export function GitHubCatalogController({ call, demo, sessionUnavailable, initia
   }
   function select(repository: CatalogRepository) {
     if (operation.current || !contextMatches || status?.connection.state !== "connected" || installations.state !== "loaded" || repositories.state !== "loaded") return;
-    const listed = repositories.items.find(item => item.id === repository.id && item.full_name === repository.full_name && item.installation_id === currentInstallation.current);
-    if (!listed || !catalogRepositoryCanAnalyze(listed)) return;
+    const request = requests.current.begin();
+    const accessCurrent = request.isCurrent(); request.finish();
+    if (!accessCurrent) return;
+    const selected = createCatalogMetadataSelection(repository, repositories, currentInstallation.current);
+    if (!selected) return;
     selectionVersion.current += 1; requestAttempt.current = null;
-    setSelection({ repository: listed, revisionInput: "", confirmed: false, prepared: null });
+    setSelection(selected);
   }
   function changeRevision(value: string) {
     selectionVersion.current += 1; requestAttempt.current = null;
@@ -257,7 +268,7 @@ export function GitHubCatalogController({ call, demo, sessionUnavailable, initia
     }),
     enqueue: () => void exclusive(async request => {
       const prepared = selection?.prepared;
-      if (!prepared || !selection?.confirmed || !status?.jobs_enabled) return;
+      if (!prepared || !selection?.confirmed || !status?.jobs_enabled || !catalogRepositoryCanAnalyze(selection.repository)) return;
       const { project, revision } = prepared;
       if (!requestAttempt.current || requestAttempt.current.projectId !== project.id || requestAttempt.current.revision !== revision) requestAttempt.current = { projectId: project.id, revision, id: crypto.randomUUID() };
       let result: { job: CatalogJob };

@@ -37,3 +37,7 @@ Interfaces propostas: `SourceAcquisition` devolve identidade estável, commit e 
 `main` exige PR, job `test` e resolução de conversas; force push e exclusão seguem desabilitados. Relatos de falha do Workbench devem seguir [o canal privado](../SECURITY.md). O dependency graph e os alertas Dependabot foram ativados em 17/10/2026 para o próprio repositório; alertas precisam de triagem, e atualizações automáticas permanecem desativadas. PRs #3 e #4 são estudos separados em rascunho, fora da `main`.
 
 O marco `v0.1.0` deve descrever uma **versão experimental pública** do código, com demonstração fictícia e operação real restrita ao proprietário. A release deve apontar para um commit de `main` validado, listar a aquisição GitHub efetivamente testada, a cobertura parcial e as integrações ainda pendentes. Publicar uma tag não altera a audiência do Site ou concede acesso à área real.
+
+## Marcos Q1–Q4 (26/10/2026)
+
+A sequência atual, limites e gates estão no [registro cumulativo Q1](auditoria-cumulativa-q1-2026-10-26.md). Q1 é catálogo/acesso sem processamento; Q2 é canário mínimo de compatibilidade; Q3 é jornada real e janela observada; Q4 é modelo contextual real. Nenhum deles se torna ativo por edição deste roadmap. Não repetir Q0 concluído nem marcar compatibilidade como verificada antes do canário.

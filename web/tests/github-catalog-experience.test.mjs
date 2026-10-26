@@ -12,7 +12,7 @@ import ts from 'typescript';
 // or browser/effect tests. No provider, credentials, network, or new dependency.
 const webRoot = fileURLToPath(new URL('../', import.meta.url));
 const output = await mkdtemp(join(webRoot, '.catalog-experience-'));
-let GitHubCatalog, createCatalogRequestScope, emptyCatalogPage, validateCatalogPage, mergeCatalogPage, failedCatalogPage, catalogFailureScope;
+let GitHubCatalog, createCatalogMetadataSelection, createCatalogRequestScope, emptyCatalogPage, validateCatalogPage, mergeCatalogPage, failedCatalogPage, catalogFailureScope;
 try {
   for (const file of ['components/github-catalog.tsx', 'components/github-catalog-controller.tsx']) {
     const result = ts.transpileModule(await readFile(join(webRoot, file), 'utf8'), {
@@ -29,7 +29,7 @@ try {
     await writeFile(target, result.outputText);
   }
   ({ GitHubCatalog } = await import(pathToFileURL(join(output, 'components/github-catalog.mjs')).href));
-  ({ createCatalogRequestScope, emptyCatalogPage, validateCatalogPage, mergeCatalogPage, failedCatalogPage, catalogFailureScope } = await import(pathToFileURL(join(output, 'components/github-catalog-controller.mjs')).href));
+  ({ createCatalogMetadataSelection, createCatalogRequestScope, emptyCatalogPage, validateCatalogPage, mergeCatalogPage, failedCatalogPage, catalogFailureScope } = await import(pathToFileURL(join(output, 'components/github-catalog-controller.mjs')).href));
 } finally {
   await rm(output, { recursive: true, force: true });
 }
@@ -77,7 +77,8 @@ test('metadata discovery without code permission stays visible with a protected 
   assert.match(html, /Interno · Fork/);
   assert.match(html, /Arquivado/);
   assert.match(html, /leitura do código ainda não autorizada à App/);
-  assert.match(html, /<button class="button secondary" disabled="">Escolher repositório/);
+  assert.match(html, /<button class="button secondary">Escolher repositório/);
+  assert.doesNotMatch(html, /<button[^>]*disabled[^>]*>Escolher repositório/);
   assert.match(html, /href="https:\/\/github.com\/settings\/installations\/11"/);
   assert.match(html, /Conferir autorização no GitHub/);
   assert.match(html, /Cobertura parcial da conta GitHub/);
@@ -125,7 +126,8 @@ test('metadata discovery never expands the QA fixture policy or suggests GitHub 
   const html = renderCatalog(value);
   assert.match(html, /somente fixtures previamente selecionadas podem ser analisadas/);
   assert.match(html, /análise bloqueada pela seleção exclusiva de fixtures do QA/);
-  assert.match(html, /<button class="button secondary" disabled="">Escolher repositório/);
+  assert.match(html, /<button class="button secondary">Escolher repositório/);
+  assert.doesNotMatch(html, /<button[^>]*disabled[^>]*>Escolher repositório/);
   assert.doesNotMatch(html, /Conferir autorização no GitHub/);
 });
 
@@ -381,4 +383,48 @@ test('the embedded confirmation explains the move to job tracking before submiss
   assert.ok(explanation >= 0 && explanation < submit);
   assert.match(html, /resultado ficará disponível quando o processamento terminar/);
   assert.doesNotMatch(renderCatalog(value), /Ao solicitar, você abrirá o acompanhamento/);
+});
+
+
+test('zero filtered results offers a local reset without mistaking hidden authorized items for no access', () => {
+  const value = model({ filters: { q: 'missing-fixture', visibility: '', archived: '', language: '' } });
+  const html = renderCatalog(value, true);
+  assert.match(html, /Nenhum repositório corresponde aos filtros/);
+  assert.match(html, /Limpar filtros desta instalação/);
+  assert.doesNotMatch(html, /Nenhum repositório autorizado retornado|Escolher repositório/);
+  const empty = renderCatalog(model({ repositories: mergeCatalogPage(emptyCatalogPage(), [], pageResponse(1, null, 0)) }), true);
+  assert.match(empty, /Nenhum repositório autorizado retornado/);
+  assert.doesNotMatch(empty, /Limpar filtros desta instalação/);
+});
+
+
+test('authorized metadata can be selected while QA processing or Contents access stays blocked', () => {
+  for (const analysis_access of [
+    { state: 'available', can_analyze: true, qa_allowed: false, qa_reason: 'window_not_open' },
+    { state: 'contents_permission_required', can_analyze: false, manage_url: 'https://github.com/settings/installations/11' },
+  ]) {
+    const item = { ...repository(9), analysis_access };
+    const repositories = mergeCatalogPage(emptyCatalogPage(), [item], pageResponse(1, null, 1));
+    const selected = createCatalogMetadataSelection(item, repositories, 11);
+    assert.deepEqual(selected, { repository: item, revisionInput: '', confirmed: false, prepared: null });
+    const html = renderCatalog(model({ repositories, selection: selected }), true);
+    assert.match(html, /Repositório selecionado: synthetic-account-a\/fixture-9/);
+    assert.match(html, /conserva somente os metadados já autorizados/);
+    assert.match(html, /Preparar commit e solicitar análise continuam bloqueados/);
+    assert.doesNotMatch(html, /<form|Preparar análise e fixar commit|Solicitar análise limitada|Commit fixado/);
+    if (analysis_access.qa_allowed === false) assert.doesNotMatch(html, /Conferir autorização no GitHub/);
+    else assert.match(html, /Conferir autorização no GitHub/);
+  }
+});
+
+test('metadata selection accepts only a current successful page and its exact repository identity', () => {
+  const item = repository(9), repositories = mergeCatalogPage(emptyCatalogPage(), [item], pageResponse(1, null, 1));
+  assert.equal(createCatalogMetadataSelection(item, failedCatalogPage(repositories), 11), null);
+  assert.equal(createCatalogMetadataSelection(item, { ...repositories, state: 'loading' }, 11), null);
+  assert.equal(createCatalogMetadataSelection(item, repositories, 22), null);
+  assert.equal(createCatalogMetadataSelection({ ...item, id: 10 }, repositories, 11), null);
+  assert.equal(createCatalogMetadataSelection({ ...item, full_name: 'synthetic-account-b/fixture-9' }, repositories, 11), null);
+  const html = renderCatalog(model({ repositories, selection: createCatalogMetadataSelection(item, repositories, 11), status: { enabled: true, connection: { state: 'revoked' }, jobs_enabled: false, limits } }), true);
+  assert.doesNotMatch(html, /synthetic-account-a\/fixture-9|Preparar análise de|Repositório selecionado:/);
+  assert.match(html, /acesso aos repositórios foi revogado/);
 });

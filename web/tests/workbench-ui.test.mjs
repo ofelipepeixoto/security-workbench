@@ -12,7 +12,7 @@ import ts from 'typescript';
 const webRoot = fileURLToPath(new URL('../', import.meta.url));
 const output = await mkdtemp(join(webRoot, '.ui-render-'));
 const files = ['app/workbench.tsx', 'app/access-panel.tsx', 'components/operational-info.tsx', 'components/demo-workbench.ts', 'components/github-catalog.tsx', 'components/github-catalog-controller.tsx', 'components/github-session-status.tsx', 'components/automatic-guidance.tsx', 'components/contextual-review.tsx'];
-let Workbench, WorkbenchListState, RunMetadata, RunEvidenceDetails, RunOutcome, RunCoverage, RunsTable, GitHubCatalog, CatalogJobStatus, filterCatalogRepositories, catalogFailureScope;
+let AccessPanel, Workbench, WorkbenchListState, RunMetadata, RunEvidenceDetails, RunOutcome, RunCoverage, RunsTable, GitHubCatalog, CatalogJobStatus, filterCatalogRepositories, catalogFailureScope;
 try {
   for (const file of files) {
     const source = await readFile(join(webRoot, file), 'utf8');
@@ -32,6 +32,7 @@ try {
   await mkdir(join(output, 'lib'), { recursive: true });
   await copyFile(join(webRoot, 'lib/rea-import-attempt.mjs'), join(output, 'lib/rea-import-attempt.mjs'));
   for (const file of ['correction-prompt.mjs', 'github-session-monitor.mjs', 'workbench-request-scope.mjs', 'review-advisor.mjs', 'contextual-review-request.mjs']) await copyFile(join(webRoot, 'lib', file), join(output, 'lib', file));
+  ({ AccessPanel } = await import(pathToFileURL(join(output, 'app/access-panel.mjs')).href));
   const components = await import(pathToFileURL(join(output, 'app/workbench.mjs')).href);
   Workbench = components.default; WorkbenchListState = components.WorkbenchListState; RunMetadata = components.RunMetadata; RunEvidenceDetails = components.RunEvidenceDetails; RunOutcome = components.RunOutcome; RunCoverage = components.RunCoverage;
   RunsTable = components.RunsTable;
@@ -386,4 +387,19 @@ test('repository credential failures do not invalidate the independent login ses
   assert.equal(catalogFailureScope(401), 'login_session');
   assert.equal(catalogFailureScope(403, 'forbidden'), 'object_access');
   assert.equal(catalogFailureScope(503, 'rate_limited'), 'other');
+});
+
+
+test('access copy follows environment authorization without claiming owner-only QA or public-only App access', () => {
+  for (const signedIn of [false, true]) {
+    const html = renderToStaticMarkup(React.createElement(AccessPanel, { signedIn, name: 'synthetic-authorized-user', githubReady: true, csrfToken: 'synthetic-csrf' }));
+    assert.match(html, /Login, conexão da App e análise são etapas distintas/);
+    assert.match(html, /repositórios autorizados à sua conta e à instalação/);
+    assert.match(html, /entrar ou listar não inicia análises/);
+    assert.doesNotMatch(html, /operação real continua individual|Somente a conta GitHub do proprietário|somente a leitura pública do namespace autorizado|Operação autorizada para o proprietário/i);
+    if (signedIn) assert.match(html, /identidade GitHub foi validada/);
+    else assert.match(html, /piloto autorizado no QA não abre o acesso público nem altera a produção/);
+  }
+  const denied = renderToStaticMarkup(React.createElement(AccessPanel, { signedIn: false, name: 'Visitante', githubReady: true, csrfToken: '', authResult: 'forbidden' }));
+  assert.match(denied, /conta foi identificada, mas não está autorizada a operar neste ambiente/);
 });

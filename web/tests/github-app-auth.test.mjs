@@ -230,6 +230,60 @@ test('connection status never turns provider rate limit into disconnected or emp
   assert.equal(count(f, 'workbench_github_app_connections'), 1); f.db.close();
 });
 
+test('a delayed connection status cannot delete or validate a replaced or disconnected credential generation', async () => {
+  for (const change of ['reconnect', 'disconnect']) {
+    for (const status of [200, 401]) {
+      let checking = false, observed, resume;
+      const reached = new Promise(resolve => { observed = resolve; });
+      const f = fixture({ fetcher: async url => {
+        if (checking && url === 'https://api.github.com/user') {
+          checking = false; observed();
+          return new Promise(resolve => { resume = resolve; });
+        }
+        return null;
+      } });
+      try {
+        await connect(f);
+        const oldEnvelope = f.db.sql.prepare('SELECT token_envelope FROM workbench_github_app_connections').get().token_envelope;
+        checking = true;
+        const pending = f.auth.getConnection(USER);
+        const rejected = assert.rejects(pending, { code: 'unavailable' });
+        await reached;
+        if (change === 'reconnect') await connect(f);
+        else assert.equal((await f.auth.disconnectRequest(mutation('/api/auth/github-app/disconnect'))).status, 200);
+        const replacement = f.db.sql.prepare('SELECT token_envelope FROM workbench_github_app_connections').get()?.token_envelope;
+        if (change === 'reconnect') assert.notEqual(replacement, oldEnvelope);
+        else assert.equal(replacement, undefined);
+        resume(status === 200 ? Response.json({ id: 101, login: 'fixture-owner' }) : new Response('inert denial', { status }));
+        await rejected;
+        assert.equal(f.db.sql.prepare('SELECT token_envelope FROM workbench_github_app_connections').get()?.token_envelope, replacement);
+        assert.equal((await f.auth.getConnection(USER)).state, change === 'reconnect' ? 'connected' : 'not_connected');
+      } finally { f.db.close(); }
+    }
+  }
+});
+
+test('a connection expiring during the provider check is not reported as connected', async () => {
+  let checking = false, observed, resume;
+  const reached = new Promise(resolve => { observed = resolve; });
+  const f = fixture({ fetcher: async url => {
+    if (checking && url === 'https://api.github.com/user') {
+      checking = false; observed();
+      return new Promise(resolve => { resume = resolve; });
+    }
+    return null;
+  } });
+  try {
+    await connect(f); checking = true;
+    const pending = f.auth.getConnection(USER);
+    await reached; f.advance(28801);
+    resume(Response.json({ id: 101, login: 'fixture-owner' }));
+    const status = await pending;
+    assert.equal(status.state, 'expired'); assert.equal(status.connected, false);
+    assert.equal(count(f, 'workbench_github_app_connections'), 1);
+  } finally { f.db.close(); }
+});
+
 test('callback rejects redirects and oversized provider responses without following a new URL', async () => {
   for (const provider of [new Response(null, { status: 302, headers: { Location: 'https://evil.invalid' } }), new Response('{}', { headers: { 'Content-Length': '32769' } })]) {
     const f = fixture({ fetcher: url => url.includes('/access_token') ? provider : null });

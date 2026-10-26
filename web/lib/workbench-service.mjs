@@ -16,6 +16,15 @@ const SHA = /^[0-9a-f]{40}$/i;
 const DECISIONS = new Set(['candidate', 'confirmed', 'false_positive', 'accepted_risk']);
 const FINDING_RUN_LIMIT = 20;
 const FINDING_ROW_LIMIT = 500;
+const AMBIGUOUS_REVIEW = 'Esta análise legada contém identidades de revisão repetidas. As decisões históricas foram preservadas, mas não podem ser atribuídas individualmente às ocorrências. Revisão e comparação dessas identidades estão indisponíveis.';
+function ambiguousFindingIds(findings = []) {
+  const seen = new Set(), repeated = new Set();
+  for (const finding of findings) {
+    if (seen.has(finding.fingerprint)) repeated.add(finding.fingerprint);
+    seen.add(finding.fingerprint);
+  }
+  return repeated;
+}
 
 export class WorkbenchError extends Error {
   constructor(message, status = 400, code) { super(message); this.status = status; if (code === 'not_found') this.code = code; }
@@ -150,16 +159,19 @@ export function createWorkbenchService({ db, ownerId, user = { userId: ownerId }
     const result = row.result_json ? JSON.parse(row.result_json) : null;
     const decisions = await all('SELECT fingerprint, decision FROM workbench_reviews WHERE owner_id = ? AND run_id = ?', ownerId, row.id);
     const byFingerprint = new Map(decisions.map(item => [item.fingerprint, item.decision]));
+    const ambiguous = ambiguousFindingIds(result?.findings ?? []);
     const run = {
       ...(result ?? {}),
       id: row.id, project_id: row.project_id, repo: row.repo, repository_id: row.repository_id,
       status: row.status, revision: row.revision, created_at: row.created_at,
       digest: result?.snapshot_digest ?? null, snapshot_digest: result?.snapshot_digest ?? null,
       files_read: result?.files_read ?? null, bytes_read: result?.bytes_read ?? null,
-      partial: result?.partial ?? null, omissions: result?.omissions ?? [],
+      partial: result?.partial ?? null, omissions: [...(result?.omissions ?? []), ...(ambiguous.size ? [AMBIGUOUS_REVIEW] : [])],
       findings: (result?.findings ?? []).map(finding => {
-        const decision = byFingerprint.get(finding.fingerprint) ?? 'candidate';
-        return { ...finding, status: decision, decision };
+        const recorded = byFingerprint.get(finding.fingerprint);
+        const decision = ambiguous.has(finding.fingerprint) ? 'candidate' : recorded ?? 'candidate';
+        return { ...finding, status: decision, decision,
+          ...(ambiguous.has(finding.fingerprint) ? {review_identity_ambiguous:true, recorded_decision:recorded ?? null} : {}) };
       }),
       dependencies: result?.dependencies ?? [], failure_code: row.failure_code,
     };
@@ -482,6 +494,7 @@ export function createWorkbenchService({ db, ownerId, user = { userId: ownerId }
           if (!DECISIONS.has(payload.decision)) throw new WorkbenchError('Decisão de revisão inválida.');
           const result = JSON.parse(row.result_json);
           if (typeof payload.fingerprint !== 'string' || !result.findings.some(finding => finding.fingerprint === payload.fingerprint)) throw new WorkbenchError('Candidato não encontrado nesta análise.', 404);
+          if (ambiguousFindingIds(result.findings).has(payload.fingerprint)) throw new WorkbenchError(AMBIGUOUS_REVIEW, 409);
           await write('INSERT INTO workbench_reviews (id, owner_id, run_id, fingerprint, decision, updated_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (owner_id, run_id, fingerprint) DO UPDATE SET decision = excluded.decision, updated_at = excluded.updated_at', uuid(), ownerId, row.id, payload.fingerprint, payload.decision, stamp());
           return { run: await fullRun(row) };
         }
@@ -493,6 +506,7 @@ export function createWorkbenchService({ db, ownerId, user = { userId: ownerId }
           const left = JSON.parse(before.result_json);
           const right = JSON.parse(after.result_json);
           if ((left.source ?? 'github-public') !== (right.source ?? 'github-public')) throw new WorkbenchError('Compare análises produzidas pelo mesmo método.');
+          if (ambiguousFindingIds(left.findings).size || ambiguousFindingIds(right.findings).size) throw new WorkbenchError(AMBIGUOUS_REVIEW, 409);
           const old = new Set(left.findings.map(finding => finding.fingerprint));
           const current = new Set(right.findings.map(finding => finding.fingerprint));
           return { comparison: { new: [...current].filter(item => !old.has(item)), no_longer_detected: [...old].filter(item => !current.has(item)), still_detected: [...current].filter(item => old.has(item)), partial: left.partial || right.partial } };

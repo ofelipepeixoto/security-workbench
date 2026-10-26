@@ -578,3 +578,36 @@ test('REA client retry after a lost response reuses one persisted analysis', asy
   assert.notEqual(next.run.id, repeated.run.id);
   assert.equal((await db.prepare('SELECT COUNT(*) AS count FROM workbench_runs').bind().first()).count, 2);
 });
+
+test('legacy repeated identities retain historical decisions without assigning them to separate occurrences',async t=>{
+  const db=database();t.after(()=>db.close());
+  const fp='a'.repeat(20),base=scanner();
+  const mocked=scanner({async inspectGitHub(){const r=await base.inspectGitHub();r.findings=[1,4].map(line=>({fingerprint:fp,kind:'broad-workflow-permissions',rule_id:'SWB-WORKFLOW-001/1',path:'.github/workflows/ci.yml',line,status:'candidate',confidence:'high',evidence:'Synthetic workflow candidate'}));return r;},renderReport:(await import('../lib/scanner.mjs')).renderReport});
+  const svc=createWorkbenchService({db,ownerId:'owner-a',scanner:mocked}),project=await authorize(svc);
+  const {run}=await svc.act({action:'scan',projectId:project.id,requestId:REQUEST,revision:REVISION});
+  await db.prepare('INSERT INTO workbench_reviews (id,owner_id,run_id,fingerprint,decision,updated_at) VALUES (?,?,?,?,?,?)').bind('historical-decision','owner-a',run.id,fp,'confirmed',new Date().toISOString()).run();
+  const viewed=(await svc.act({action:'run',runId:run.id})).run;
+  assert.ok(viewed.omissions.some(x=>/identidades de revisão repetidas/.test(x)));
+  assert.ok(viewed.findings.every(f=>f.status==='candidate'&&f.review_identity_ambiguous===true&&f.recorded_decision==='confirmed'));
+  assert.ok(viewed.guidance.items.every(x=>x.decision_status==='candidate'&&x.state==='insufficient_context'));
+  const original=await db.prepare('SELECT * FROM workbench_reviews WHERE id=?').bind('historical-decision').first();
+  await assert.rejects(svc.act({action:'review',runId:run.id,fingerprint:fp,decision:'false_positive'}),e=>e.status===409);
+  await assert.rejects(svc.act({action:'compare',before:run.id,after:run.id}),e=>e.status===409);
+  assert.deepEqual(await db.prepare('SELECT * FROM workbench_reviews WHERE id=?').bind('historical-decision').first(),original);
+  const {markdown}=await svc.act({action:'report',runId:run.id});
+  assert.match(markdown,/Decisão histórica preservada no registro: confirmed/);
+  assert.match(markdown,/não atribuída individualmente a esta ocorrência/);
+  assert.doesNotMatch(markdown,/estado: confirmed/);
+});
+
+test('individual repeated-candidate IDs retain independent review and comparison',async t=>{
+  const db=database();t.after(()=>db.close());const ids=['a'.repeat(20),'b'.repeat(20)],base=scanner();let count=0;
+  const mocked=scanner({async inspectGitHub(){const r=await base.inspectGitHub();r.findings=(++count===1?ids:ids.slice(0,1)).map((fingerprint,index)=>({fingerprint,kind:'broad-workflow-permissions',path:'.github/workflows/ci.yml',line:index+1,status:'candidate'}));return r;}});
+  const svc=createWorkbenchService({db,ownerId:'owner-a',scanner:mocked}),project=await authorize(svc);
+  const first=(await svc.act({action:'scan',projectId:project.id,requestId:REQUEST,revision:REVISION})).run;
+  const second=(await svc.act({action:'scan',projectId:project.id,requestId:REQUEST2,revision:REVISION})).run;
+  const reviewed=(await svc.act({action:'review',runId:first.id,fingerprint:ids[1],decision:'false_positive'})).run;
+  assert.deepEqual(reviewed.findings.map(f=>f.status),['candidate','false_positive']);
+  const {comparison}=await svc.act({action:'compare',before:first.id,after:second.id});
+  assert.deepEqual(comparison.no_longer_detected,[ids[1]]);assert.deepEqual(comparison.still_detected,[ids[0]]);
+});

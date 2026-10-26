@@ -232,3 +232,17 @@ test("Markdown report treats source fields as text, escaping HTML/links/code/lin
   assert.ok(!report.includes("<script>")); assert.ok(!report.includes("[x](")); assert.ok(!report.includes("https://evil")); assert.ok(!report.includes("`code`"));
   assert.ok(report.includes("&#60;script&#62;")); assert.match(report, /sem análise de CVEs/); assert.match(report, /Ausência de achados não comprova segurança/);
 });
+
+test('repeated native occurrences have individual stable IDs without including secret values',async()=>{
+  const text='permissions: write-all\njobs:\n  example:\n    permissions: write-all\n';
+  const result=await inspectGitHub(REPO,ID,REVISION,apiFixture({'.github/workflows/ci.yml':text}));
+  assert.deepEqual(result.findings.map(f=>f.line),[1,4]);
+  assert.equal(result.findings[0].fingerprint,'5043a039b349ac5a3e2f','first identity remains compatible');
+  assert.equal(result.findings[1].fingerprint,createHash('sha256').update('broad-workflow-permissions\0.github/workflows/ci.yml\0write-all\0occurrence:2').digest('hex').slice(0,20));
+  assert.equal(new Set(result.findings.map(f=>f.fingerprint)).size,2);
+  const run=text=>inspectGitHub(REPO,ID,REVISION,apiFixture({'main.py':text}));
+  const left=await run("password='synthetic-only-one'\npassword='synthetic-only-two'\n");
+  const right=await run("# line shift\npassword='different-inert-one'\npassword='different-inert-two'\n");
+  assert.deepEqual(left.findings.map(f=>f.fingerprint),right.findings.map(f=>f.fingerprint));
+  assert.equal(new Set(left.findings.map(f=>f.fingerprint)).size,2);
+});

@@ -1,17 +1,20 @@
-# Reconciliação das entregas — 26/10/2026
+# Reconciliação das entregas — atualização Q1 de 26/10/2026
 
-Este candidato cumulativo local parte da árvore publicada de #46. Nenhuma nova publicação, implantação, migration remota, consentimento, ativação ou chamada de IA faz parte da preparação. O relatório privado acompanha commit, digests e estado operacional. Não confundir fonte revisável, QA implantado, piloto homologado e produção.
+Esta matriz substitui o estado de preparação anterior. Cadeia #43 → #44 → #45 → #46 → #47 aberta em rascunho, sem merge. QA recebeu cumulativamente Q0 `afcdf120b69a54c28ba1083b761d0ca451495477`; correções Q1 desta branch não foram implantadas. Produção v15 preservada. `main` foi reconfirmada em `cf906efd01c832632f96eafac6555d55f4e39ff9`; não equivale à versão do Site.
 
-| Pedido original de 26/10 | Implementação principal | PR/head remoto | Implantado | Teste real e lacuna |
-| --- | --- | --- | --- | --- |
-| Nome/ícone GitHub e verde apenas com sessão validada | `github-session-status.tsx`, `github-session-monitor.mjs`, `/api/auth/github/session` | #44 `414faab6b044791756de1e658ad333627e782b0c` | Não no QA conhecido; ainda #43 | CI #44 passou; sessão/UI do novo build ainda não homologadas |
-| Repositório nunca cadastrado em Nova análise | `github-catalog-controller.tsx`, `github-app-client.mjs`, catálogo em `workbench-service.mjs` | #44 mais correções deste candidato | Não implantado | Contratos locais com 101 itens e múltiplas instalações; cobertura depende do consentimento App/usuário/organização |
-| Markdown com candidatos e prompt portátil | `scanner.mjs`, `correction-prompt.mjs` | #45 `e071215feb21ed35207e250a7a949b5d8d592d93` | Não no QA conhecido | Exportação real do serviço local salva/reaberta; download e abertura no navegador hospedado pendentes |
-| Orientador automático complementar | `review-advisor.mjs`, `automatic-guidance.tsx` | #46 `1044098259bc1881e74a541ef54cb1f98ed0677f` | Não no QA conhecido | Regras locais e CI #46 aprovadas; não é modelo contextual |
-| IA contextual automática no produto | `contextual-review*.mjs`, rota e painel próprios, migration 0008 | Novo candidato local, sem PR novo | Desligada; não implantada | HTTP/SQLite e transporte sintético; projeto/modelo/dados/custo/purga/provedor reais pendentes |
-| Homologação hospedada isolada | `qa-control.mjs`, `qa-guard.mjs`, migration 0009, métricas opt-in | Novo candidato local | QA conhecido permanece #43 `71c878533270022aa68748f73b3f9f6a6f2727db` | Plano/recursos conferidos somente leitura; canário/janela/QA do candidato não executados |
-
-A cadeia remota #43 → #44 → #45 → #46 foi reconfirmada aberta em rascunho e sem merge. As CIs anteriores não substituem a CI de um novo head. Produção v15 permanece fora do destino. A inspeção do navegador atual identificou o QA antigo em demonstração e a necessidade de entrada na área privada; não é prova de falha de OAuth nem de isolamento A/B. As duas contas precisam ser exercitadas no candidato implantado.
+| Pedido original | Implementação / PR de origem | QA Q0 | Evidência atual e lacuna |
+|---|---|---|---|
+| Login, ícone e verde só com sessão validada | github-session-status/monitor, #44 | Implantado | Login A e saída/reentrada exercitados; B isolado depende do titular |
+| Catálogo de repositórios nunca cadastrados | github-app-client/auth, workbench-service, catalog controller, #44/#47 | Implantado | Fixture privada A apareceu com zero projetos; instalação selected e cobertura parcial conferidas. Volume/múltiplas instalações são sintéticos |
+| Escolher sem preparar commit/análise | catalog/controller, correção Q1 | Defeito conhecido no Q0 | Q0 desabilita seleção quando QA fechado. Q1 separa seleção local de metadados e análise; regressões passam, deploy futuro pendente |
+| A/B, revogação, respostas atrasadas | principal/owner, FKs, request scope, auth | Q0 implantado; corrida status corrigida só Q1 | Isolamento e interleavings sintéticos; jornada B real incompleta. Não associar registros globais ao primeiro login |
+| Markdown, evidências e prompt portátil | scanner/correction-prompt, #45 | Implantado | Resultados sintéticos e contratos testados; resultado hospedado autorizado ausente |
+| Orientador automático por regras | review-advisor/automatic-guidance, #46 | Implantado | Teste determinístico e abstinência; não é modelo generativo |
+| Revisão por ocorrência | scanner/core/store/service, correção Q1 | Colisão herdada no Q0 | Q1 identifica repetições e bloqueia revisão legada ambígua sem alterar ledger; implantação futura pendente |
+| IA contextual rastreável | contextual-review/store/workbench, #47 | Código presente, desligado | Autorização, orçamento, citações, injeção e A/B sintéticos; nenhum provedor real testado |
+| QA isolado e recuperação | qa-guard/control, migrations 0008/0009 | Aplicadas em Q0 | Backup cifrado concluído; sem restauração operacional. Não repetir ensaio já aprovado |
+| Desktop/mobile/teclado | access/catalog/session | Inspeção parcial | Desktop/teclado no recorte; dimensão mobile solicitada não se aplicou, logo não aprovado |
+| Homologação, filas e sete dias | jobs/consumer/QA gates | Desligados | Q2/Q3 futuros; nenhuma janela, reserva ou análise criada para validar telas |
 
 ## Catálogo e consentimento
 
@@ -21,8 +24,6 @@ Login de identidade com scope vazio não concede acesso global. O token de usuá
 
 A busca é explicitamente sobre páginas carregadas da instalação selecionada. Até 100 itens por página e teto de dez páginas por instalação neste cliente; o limite e a incompletude são mostrados, não uma falsa conclusão de catálogo completo. Repositórios são deduplicados por ID estável. São navegáveis múltiplas instalações e páginas, com retomada de erro; nenhuma seleção/listagem resolve SHA ou cria jobs. Só a ação de preparar análise revalida e fixa commit; no QA a política de fixtures continua sendo uma restrição adicional.
 
-## Critérios de entrega ainda abertos
+## Critérios ainda abertos
 
-P0: nenhum defeito conhecido remanescente no recorte revisado; isto não é prova de segurança total. P1 antes de ativar: medir CPU/subrequests/filas/D1 no Free, consentimentos e fixture B atuais, jornada hospedada A/B, mecanismo de encerramento do cron, projeto/modelo/dados/orçamento/purga para IA. P2: ampliar a política contextual para outras linguagens somente após avaliação rotulada; atual recorte deliberadamente limitado a estrutura de workflow. Nenhum desses itens pode receber estado aprovado apenas por mock, SSR, CI ou passagem de tempo simulada.
-
-Para o roteiro de homologação, custos, canário, limites e rollback, ver `qa-candidato-2026-10-26.md`. Para a integração contextual, contexto permitido e bloqueios de ativação, ver `ia-contextual-integracao.md`.
+A [auditoria Q1](auditoria-cumulativa-q1-2026-10-26.md) registra achados, estado de dependências e propostas Q2/Q3/Q4. Defeitos P1 do Q0 e pendências hospedadas impedem chamar o candidato de pronto ou o piloto de homologado. Uma CI nova só valida seu próprio SHA; não altera o QA. Não há autorização de nova implantação, IA real ou início de janela nesta entrega.

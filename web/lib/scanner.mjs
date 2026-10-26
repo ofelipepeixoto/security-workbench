@@ -154,6 +154,14 @@ async function finding(kind, path, line, detail, evidence, impact, recommendatio
 async function inspectText(path, text, remainingFindings, remainingDependencies) {
   const findings = [], dependencies = [];
   let findingsTotal = 0, dependenciesTotal = 0;
+  // Preserve the first legacy identity; repeated rule/key occurrences need
+  // separate review identities without hashing any potential secret value.
+  const occurrences = new Map();
+  function occurrenceDetail(kind, detail) {
+    const key = `${kind}\0${detail}`, count = (occurrences.get(key) ?? 0) + 1;
+    occurrences.set(key, count);
+    return count === 1 ? detail : `${detail}\0occurrence:${count}`;
+  }
   function addDependency(item) {dependenciesTotal++; if (dependencies.length < remainingDependencies) dependencies.push(item);}
   const lines = text.split(/\r\n|[\n\r\v\f\x1c-\x1e\x85\u2028\u2029]/);
   for (let i = 0; i < lines.length; i++) {
@@ -161,9 +169,9 @@ async function inspectText(path, text, remainingFindings, remainingDependencies)
     if (match && !PLACEHOLDER.test(match[2].trim())) {
       const key = match[1].toLowerCase();
       findingsTotal++;
-      if (findings.length < remainingFindings) findings.push(await finding("possible-secret", path, number, key, `Atribuição a ${key} com valor [REDACTED] em ${path}:${number}.`, "Uma credencial real exposta pode permitir acesso indevido; a validade não foi verificada.", "Revisar o valor fora do relatório; se for real, revogá-lo e removê-lo do histórico com procedimento controlado.", `/${path}`.includes("/test") || path.includes("fixture") ? "low" : "medium"));
+      if (findings.length < remainingFindings) findings.push(await finding("possible-secret", path, number, occurrenceDetail("possible-secret", key), `Atribuição a ${key} com valor [REDACTED] em ${path}:${number}.`, "Uma credencial real exposta pode permitir acesso indevido; a validade não foi verificada.", "Revisar o valor fora do relatório; se for real, revogá-lo e removê-lo do histórico com procedimento controlado.", `/${path}`.includes("/test") || path.includes("fixture") ? "low" : "medium"));
     }
-    if (path.startsWith(".github/workflows/") && /^\s*permissions\s*:\s*write-all\s*(?:#.*)?$/.test(lines[i])) {findingsTotal++; if (findings.length < remainingFindings) findings.push(await finding("broad-workflow-permissions", path, number, "write-all", `Declaração permissions: write-all em ${path}:${number}.`, "Um workflow comprometido pode obter permissões amplas, conforme seu gatilho e contexto.", "Revisar o gatilho e conceder apenas permissões específicas necessárias.", "high"));}
+    if (path.startsWith(".github/workflows/") && /^\s*permissions\s*:\s*write-all\s*(?:#.*)?$/.test(lines[i])) {findingsTotal++; if (findings.length < remainingFindings) findings.push(await finding("broad-workflow-permissions", path, number, occurrenceDetail("broad-workflow-permissions", "write-all"), `Declaração permissions: write-all em ${path}:${number}.`, "Um workflow comprometido pode obter permissões amplas, conforme seu gatilho e contexto.", "Revisar o gatilho e conceder apenas permissões específicas necessárias.", "high"));}
   }
   if (path === "requirements.txt") {
     for (const line of lines) {const match = line.match(/^\s*([A-Za-z0-9_.-]+)==([A-Za-z0-9_.!+~-]+)\s*$/); if (match) addDependency({name: match[1], version: match[2], source: path});}
@@ -323,6 +331,8 @@ export function renderReport(run) {
   lines.push("## Achados", "");
   if (!run.findings?.length) lines.push("Nenhum candidato nos arquivos lidos.");
   for (const item of run.findings || []) lines.push(`### ${markdown(item.kind)} · ${markdown(item.fingerprint)}`, "", `Local: ${markdown(item.path)}:${markdown(item.line)} · estado: ${markdown(item.status)} · confiança: ${markdown(item.confidence)}`, "", `Regra: ${markdown(item.rule_id || "não registrada")} · severidade potencial: ${markdown(item.severity || "não registrada")}`, `Justificativa: ${markdown(item.severity_reason || "não registrada")}`, "", `Evidência: ${markdown(item.evidence)}`, "", `Impacto possível: ${markdown(item.impact)}`, "", `Recomendação: ${markdown(item.recommendation)}`, "");
+  for (const item of run.findings || []) if (item.review_identity_ambiguous === true) lines.push(
+    `Identidade de revisão ambígua: ${markdown(item.fingerprint)}. Decisão histórica preservada no registro: ${markdown(item.recorded_decision ?? 'não registrada')}; não atribuída individualmente a esta ocorrência.`, "");
   lines.push(renderReviewGuidanceMarkdown(run), "", "## Inventário de dependências (sem análise de CVEs)", "");
   if (!run.dependencies?.length) lines.push("Nenhuma dependência reconhecida nos manifestos suportados.");
   for (const item of run.dependencies || []) lines.push(`- ${markdown(item.name)} ${markdown(item.version)} (${markdown(item.source)})`);

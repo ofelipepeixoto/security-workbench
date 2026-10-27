@@ -41,3 +41,5 @@ O marco `v0.1.0` deve descrever uma **versão experimental pública** do código
 ## Marcos Q1–Q4 (26/10/2026)
 
 A sequência atual, limites e gates estão no [registro cumulativo Q1](auditoria-cumulativa-q1-2026-10-26.md). Q1 é catálogo/acesso sem processamento; Q2 é canário mínimo de compatibilidade; Q3 é jornada real e janela observada; Q4 é modelo contextual real. Nenhum deles se torna ativo por edição deste roadmap. Não repetir Q0 concluído nem marcar compatibilidade como verificada antes do canário.
+
+Atualização de 27/10 UTC: o deploy corretivo Q1 já está no QA. A e B têm evidência de login/catálogo/seleção em momentos distintos; isso não conclui isolamento entre perfis. Q2 foi autorizado condicionalmente, mas continua bloqueado pelos gates da [matriz atual](reconciliacao-entregas-2026-10-26.md). A branch acrescenta somente correlação sanitizada de tentativa/fonte e regressões do teto global; não autoriza substituir o código implantado. Q3 e Q4 permanecem propostas separadas, sem ativação.

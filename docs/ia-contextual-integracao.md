@@ -1,6 +1,6 @@
 # Revisão contextual preparada — 26/10/2026
 
-Implementação server-side complementar ao scanner e ao orientador determinístico de #46. Não está implantada nem ativada. O limite vigente é custo incremental R$0; portanto não houve chamada OpenAI real, criação de chave, política financeira ou consentimento de dados. A existência deste código não comprova qualidade do modelo ou homologação.
+Implementação server-side complementar ao scanner e ao orientador determinístico de #46. O código está presente no QA, mas permanece desligado, sem política financeira ativa. O limite vigente é custo incremental R$0; portanto não houve chamada OpenAI real, criação de chave ou consentimento de dados para o provedor. A existência deste código não comprova qualidade do modelo ou homologação.
 
 ## Caminho implementado
 

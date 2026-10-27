@@ -19,8 +19,21 @@ test('one bounded numeric record contains no raw job ID, strings from events or 
  assert.equal(rows.length,1);const r=rows[0],serialized=JSON.stringify(r);
  assert.equal(r.wall_ms,50);assert.equal(r.github_attempts,2);assert.equal(r.github_sent,1);assert.equal(r.github_bytes,100);
  assert.equal(r.cpu_ms,null);assert.equal(r.cpu_source,'cloudflare_trace_required');assert.equal(r.outcome,'error');assert.equal(r.error_code,'other');
+ assert.equal(r.analysis_attempt,null);assert.equal(r.transport_attempt,null);assert.equal(r.source_revision,null);
  assert.equal(r.job_ref.length,24);assert.ok(serialized.length<1000);assert.ok(!serialized.includes(jobId));
  for(const value of ['PRIVATE_SYNTHETIC','private-repository','private.synthetic'])assert.ok(!serialized.includes(value));
+});
+test('attempt correlation accepts only a persisted-claim event and bounded metadata, never infers CPU',async()=>{
+ const rows=[],source='d'.repeat(40);
+ const m=await createQaMetrics({env:{...enabled,WORKBENCH_QA_SOURCE_SHA:source},jobId:randomUUID(),transportAttempt:2,emit:r=>rows.push(r)});
+ for(const event of [{attempt:1},{type:'attempt',attempt:'1'},{type:'attempt',attempt:0},{type:'attempt',attempt:3},{type:'attempt',attempt:Infinity}])m.observe(event);
+ m.observe({type:'attempt',attempt:2,version:'PRIVATE_SYNTHETIC',cpu_ms:0});m.observe({type:'attempt',attempt:1});m.finish('complete');
+ assert.equal(rows[0].analysis_attempt,2);assert.equal(rows[0].transport_attempt,2);assert.equal(rows[0].source_revision,source);
+ assert.equal(rows[0].cpu_ms,null);assert.ok(!JSON.stringify(rows).includes('PRIVATE_SYNTHETIC'));
+ for(const value of [0,-1,102,NaN,Infinity,'2','PRIVATE_SYNTHETIC']) {
+  const records=[],invalid=await createQaMetrics({env:{...enabled,WORKBENCH_QA_SOURCE_SHA:'PRIVATE_SYNTHETIC'},jobId:randomUUID(),transportAttempt:value,emit:r=>records.push(r)});
+  invalid.finish('not_found');assert.equal(records[0].transport_attempt,null);assert.equal(records[0].source_revision,null);
+ }
 });
 test('D1 wrapper preserves first/all/run/bind/batch results and rollback without extra API calls',async t=>{
  const db=migratedDatabase();t.after(()=>db.close());let calls=0;
@@ -59,7 +72,22 @@ test('opt-in consumer emits one sanitized record per A/B processing invocation w
   const result=await consumer.process(job.id);assert.equal(result.job.status,'complete');assert.equal(s.calls.length-before,12);
  }
  assert.equal(records.length,2);assert.notEqual(records[0].job_ref,records[1].job_ref);
- for(const r of records){assert.equal(r.outcome,'complete');assert.equal(r.github_sent,12);assert.ok(r.github_bytes>0);assert.ok(r.d1_api_attempts>0);assert.equal(r.cpu_ms,null);}
+ for(const r of records){assert.equal(r.outcome,'complete');assert.equal(r.github_sent,12);assert.ok(r.github_bytes>0);assert.ok(r.d1_api_attempts>0);assert.equal(r.cpu_ms,null);assert.equal(r.analysis_attempt,1);assert.equal(r.source_revision,s.env.WORKBENCH_QA_SOURCE_SHA);}
  const serialized=JSON.stringify(records);
  for(const value of ['ghu_','synthetic-fixture','invalid_synthetic_marker',s.actors.A.ownerId,s.actors.B.ownerId])assert.ok(!serialized.includes(value));
+});
+test('early retry and completed duplicate have no admitted attempt; the second real claim remains distinguishable',async t=>{
+ let failures=1;
+ const s=await qaConsumerFixture(t,{canary:true,files:1,onRequest:({entry})=>entry.stage==='blob'&&failures-->0?new Response('{}',{status:503}):undefined});
+ const records=[],consumer=createAnalysisConsumer({env:{...s.env,WORKBENCH_QA_METRICS_ENABLED:'true'},now:s.now,fetcher:s.fetcher,metricsSink:r=>records.push(r)});
+ const {job}=await s.actors.A.enqueue();
+ const first=await consumer.process(job.id,{transportAttempt:1});assert.equal(first.job.attempts,1);assert.equal(first.job.status,'queued');
+ const sent=s.calls.length;await consumer.process(job.id,{transportAttempt:2});assert.equal(s.calls.length,sent);
+ s.advance(Date.parse(first.job.available_at)-s.now().valueOf()+1);
+ assert.equal((await consumer.process(job.id,{transportAttempt:1})).job.status,'complete');
+ const completeCalls=s.calls.length;await consumer.process(job.id,{transportAttempt:2});assert.equal(s.calls.length,completeCalls);
+ assert.deepEqual(records.map(r=>r.analysis_attempt),[1,null,2,null]);
+ assert.deepEqual(records.map(r=>r.transport_attempt),[1,2,1,2]);
+ assert.equal(new Set(records.map(r=>r.job_ref)).size,1);
+ assert.ok(records.every(r=>r.cpu_ms===null));
 });

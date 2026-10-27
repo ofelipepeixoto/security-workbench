@@ -5,8 +5,9 @@ Experimental review of **authorized** repository evidence. Target code is read a
 ## Delivery states
 
 - Public production v15 is preserved. A public repository or draft PR does not mean the website runs that code.
-- Isolated QA runs Q0 commit `afcdf120b69a54c28ba1083b761d0ca451495477`. Jobs, cron, Queue consumers, the pilot window and model calls remain off.
-- Q1 changes on draft PR #47 are reviewable code, not a new deployment or a homologated pilot. The existing PR chain is preserved; no merge or release is implied.
+- Isolated QA runs corrective Q1 commit `f2e11f71112278fd7e00130ba615ca4cdd4b416b`. Jobs, cron, Queue consumers, canary, pilot window and model calls remain off.
+- A and B login/catalog/metadata selection have been exercised at different times. Separate profiles, complete hosted negative tests, mobile and per-invocation CPU evidence remain open. Conditional Q2 authorization has not started a canary.
+- Attempt-correlation improvements on draft PR #47 are reviewable code after that deployment. They are not deployed or approved for activation. The existing PR chain is preserved; no merge or release is implied.
 
 ## GitHub access
 

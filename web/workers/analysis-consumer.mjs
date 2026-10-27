@@ -23,10 +23,10 @@ function appConfig(env) {
 export function createAnalysisConsumer({env,fetcher=fetch,now=()=>new Date(),appAuthFactory=createGitHubAppAuth,observe,metricsSink}={}) {
   const qaGuard=createQaGuard({env,now});
   const active=()=>env?.WORKBENCH_JOBS_ENABLED==='true'&&env.WORKBENCH_MULTIUSER_ENABLED==='true'&&env.GITHUB_APP_ENABLED==='true'&&env.DB?.batch;
-  async function process(jobId) {
+  async function process(jobId,{transportAttempt}={}) {
     if (!active()) throw new AnalysisJobError('worker_unavailable');
     if(typeof jobId!=='string'||!UUID.test(jobId)) throw new AnalysisJobError('invalid_request',400);
-    const metrics=await createQaMetrics({env,jobId,...(metricsSink?{emit:metricsSink}:{})}),db=metrics?.wrapDb(env.DB)??env.DB;
+    const metrics=await createQaMetrics({env,jobId,transportAttempt,...(metricsSink?{emit:metricsSink}:{})}),db=metrics?.wrapDb(env.DB)??env.DB;
     const qaGuard=createQaGuard({env,db,now});
     let metricOutcome='error',metricCode;
     try {
@@ -104,7 +104,7 @@ const worker = {
     const consumer=createAnalysisConsumer({env});
     for(const message of batch.messages) {
       if(!message.body||typeof message.body.jobId!=='string'||!UUID.test(message.body.jobId)||Object.keys(message.body).join(',')!=='jobId') {message.ack();continue;}
-      try {await consumer.process(message.body.jobId);message.ack();}
+      try {await consumer.process(message.body.jobId,{transportAttempt:message.attempts});message.ack();}
       catch(error) {
         if(['qa_closed','qa_scope','qa_consumption'].includes(error.code))message.ack();
         else message.retry({delaySeconds:60});

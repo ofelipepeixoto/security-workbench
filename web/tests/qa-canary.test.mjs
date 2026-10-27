@@ -46,6 +46,29 @@ test('canary revision and scope cannot be widened; listing policies reads one sn
  const denied=await guard.catalogPolicies({ownerId:a.ownerId,githubId:ACTORS.B.githubId,repositories});
  assert.equal(denied.some(p=>p.can_analyze),false);
 });
+test('two canary actors cannot exceed four durable attempts across duplicate dispatch and delivery bursts',async t=>{
+ const s=await qaConsumerFixture(t,{canary:true,files:1,onRequest:({entry})=>entry.stage==='blob'?new Response('{}',{status:503}):undefined});
+ const jobs=[];
+ for(const name of ['A','B']) {
+  const requestId=randomUUID(),one=await s.actors[name].enqueue(requestId);
+  assert.equal((await s.actors[name].enqueue(requestId)).job.id,one.job.id);
+  jobs.push(one.job);
+ }
+ const burst=()=>Promise.all(jobs.flatMap(job=>Array.from({length:5},()=>s.consumer.process(job.id))));
+ await burst();
+ assert.deepEqual(s.db.sql.prepare('SELECT attempts FROM workbench_analysis_jobs ORDER BY id').all().map(r=>r.attempts),[1,1]);
+ const firstCalls=s.calls.length;await burst();assert.equal(s.calls.length,firstCalls,'early duplicates perform no acquisition');
+ const due=s.db.sql.prepare('SELECT max(available_at) AS at FROM workbench_analysis_jobs').get().at;
+ s.advance(Date.parse(due)-s.now().valueOf()+1);await burst();
+ assert.deepEqual(s.db.sql.prepare('SELECT attempts,status FROM workbench_analysis_jobs ORDER BY id').all().map(r=>[r.attempts,r.status]),[[2,'failed'],[2,'failed']]);
+ assert.equal(s.db.sql.prepare('SELECT sum(attempts) n FROM workbench_analysis_jobs').get().n,4);
+ assert.equal(s.calls.filter(c=>c.stage==='identity').length,4);
+ const finalCalls=s.calls.length;await burst();assert.equal(s.calls.length,finalCalls);
+ assert.ok(finalCalls<=64);assert.equal(s.reservations(),2);
+ for(const name of ['A','B'])await assert.rejects(s.actors[name].enqueue(),e=>e.code==='qa_quota');
+ assert.equal(s.db.sql.prepare('SELECT count(*) n FROM workbench_analysis_jobs').get().n,2);
+ assert.equal(s.db.sql.prepare('SELECT count(*) n FROM workbench_qa_window').get().n,0);
+});
 test('closing a canary cannot reopen it; formal opening requires closure and never reuses a canary job',async t=>{
  const s=await qaConsumerFixture(t,{canary:true}),a=s.actors.A,{job}=await a.enqueue();
  const row=s.db.sql.prepare('SELECT * FROM workbench_qa_canary').get();

@@ -2,11 +2,13 @@
 
 Plataforma experimental em construção para inspecionar ativos **autorizados**. O núcleo local analisa cópias ou lê arquivos de um commit específico pelo GitHub, sem executar código do alvo. Os resultados ficam em SQLite local.
 
-## Estado atual — 26/10/2026
+## Estado atual — 27/10/2026 UTC
 
 [English overview](README.en.md). O código evolui na cadeia de PRs em rascunho #43 → #44 → #45 → #46 → #47; a `main` não representa automaticamente o ambiente hospedado. Produção pública v15 e QA isolado têm aprovações e configurações próprias.
 
-O QA recebeu o candidato Q0 da PR #47 (`afcdf120b69a54c28ba1083b761d0ca451495477`), com migrations 0008/0009 e processamento desligado. Os ajustes Q1 desta branch são posteriores e **não estão implantados**. Login validado, conexão da App, metadados descobertos e autorização para analisar são capacidades separadas. O catálogo informa a interseção usuário × instalação, inclusive itens nunca cadastrados como projeto, sem prometer acesso global a privados/organizações. Seleção de metadados não resolve commit nem cria análise.
+O QA recebeu o deploy corretivo Q1 `f2e11f71112278fd7e00130ba615ca4cdd4b416b` da PR #47, mantendo migrations 0008/0009 e processamento desligado. Login, catálogo privado e seleção sem processamento foram exercitados em A e B em momentos distintos; perfis separados e negativos hospedados completos continuam pendentes. O canário Q2 tem autorização condicional, mas **não foi iniciado**: faltam gates de acesso, transporte autenticado e medição/privacidade. A correlação de tentativas preparada nesta branch é posterior ao deploy e não está no QA.
+
+Login validado, conexão da App, metadados descobertos e autorização para analisar são capacidades separadas. O catálogo informa a interseção usuário × instalação, inclusive itens nunca cadastrados como projeto, sem prometer acesso global a privados/organizações. Seleção de metadados não resolve commit nem cria análise.
 
 As detecções exigem avaliação humana; o orientador por regras e o prompt portátil não são IA generativa. A integração contextual está preparada, desligada, sem chamadas reais de modelo. Patches são propostas, não alterações aplicadas automaticamente. O piloto não está homologado e nenhum período de sete dias foi concluído.
 

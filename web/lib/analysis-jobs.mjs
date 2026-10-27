@@ -176,6 +176,9 @@ export function createAnalysisJobs({ db, ownerId, githubId, now = () => new Date
     if (claimed[0].meta?.changes !== 1) return get(previous.id);
     const job = await row(previous.id), controller = new AbortController();
     if (job.status !== 'running' || job.lease_token !== lease) return get(previous.id);
+    // Only the holder of the persisted claim may report an admitted attempt.
+    // Duplicate deliveries and early retries must not look like new analyses.
+    emit({type:'attempt',attempt:job.attempts});
     let timer;
     const live = () => {
       if (controller.signal.aborted) throw controller.signal.reason instanceof GitHubAppError ? controller.signal.reason : new AnalysisJobError('acquisition_timeout',504);

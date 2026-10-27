@@ -1,20 +1,21 @@
-# Reconciliação das entregas — atualização Q1 de 26/10/2026
+# Reconciliação das entregas — atualização Q1/Q2 de 27/10/2026 UTC
 
-Esta matriz substitui o estado de preparação anterior. Cadeia #43 → #44 → #45 → #46 → #47 aberta em rascunho, sem merge. QA recebeu cumulativamente Q0 `afcdf120b69a54c28ba1083b761d0ca451495477`; correções Q1 desta branch não foram implantadas. Produção v15 preservada. `main` foi reconfirmada em `cf906efd01c832632f96eafac6555d55f4e39ff9`; não equivale à versão do Site.
+Esta matriz substitui o estado de preparação anterior. Cadeia #43 → #44 → #45 → #46 → #47 aberta em rascunho, sem merge. O QA recebeu o deploy corretivo Q1 `f2e11f71112278fd7e00130ba615ca4cdd4b416b`; a correlação sanitizada de tentativas desta branch é posterior e não está implantada. Produção v15 e main permanecem preservadas e separadas. O piloto não está homologado.
 
-| Pedido original | Implementação / PR de origem | QA Q0 | Evidência atual e lacuna |
+| Pedido original | Implementação / PR de origem | QA f2e11… | Evidência atual e lacuna |
 |---|---|---|---|
-| Login, ícone e verde só com sessão validada | github-session-status/monitor, #44 | Implantado | Login A e saída/reentrada exercitados; B isolado depende do titular |
-| Catálogo de repositórios nunca cadastrados | github-app-client/auth, workbench-service, catalog controller, #44/#47 | Implantado | Fixture privada A apareceu com zero projetos; instalação selected e cobertura parcial conferidas. Volume/múltiplas instalações são sintéticos |
-| Escolher sem preparar commit/análise | catalog/controller, correção Q1 | Defeito conhecido no Q0 | Q0 desabilita seleção quando QA fechado. Q1 separa seleção local de metadados e análise; regressões passam, deploy futuro pendente |
-| A/B, revogação, respostas atrasadas | principal/owner, FKs, request scope, auth | Q0 implantado; corrida status corrigida só Q1 | Isolamento e interleavings sintéticos; jornada B real incompleta. Não associar registros globais ao primeiro login |
+| Login, ícone e verde só com sessão validada | github-session-status/monitor, #44 | Implantado | A e B validados em momentos distintos; saída/reentrada A exercitada. Dois perfis separados ainda não comprovados |
+| Catálogo de repositórios nunca cadastrados | github-app-client/auth, workbench-service, catalog controller, #44/#47 | Implantado | A e B viram sua fixture privada com zero projetos; cobertura selected/parcial informada. Volume/múltiplas instalações são sintéticos |
+| Escolher sem preparar commit/análise | catalog/controller, correção Q1 | Corrigido e exercitado | Escolher/limpar disponíveis com QA fechado nas duas contas; sem criar jobs/janela/reservas. POST autenticado negativo direto ainda pendente |
+| A/B, revogação, respostas atrasadas | principal/owner, FKs, request scope, auth | Correções Q1 implantadas | Nenhuma fixture A na listagem B observada; isso não prova negativos completos por IDs. Isolamento entre perfis, consentimentos/permissões completos e revogação real pendentes |
 | Markdown, evidências e prompt portátil | scanner/correction-prompt, #45 | Implantado | Resultados sintéticos e contratos testados; resultado hospedado autorizado ausente |
 | Orientador automático por regras | review-advisor/automatic-guidance, #46 | Implantado | Teste determinístico e abstinência; não é modelo generativo |
-| Revisão por ocorrência | scanner/core/store/service, correção Q1 | Colisão herdada no Q0 | Q1 identifica repetições e bloqueia revisão legada ambígua sem alterar ledger; implantação futura pendente |
+| Revisão por ocorrência | scanner/core/store/service, correção Q1 | Código corrigido | Q1 identifica repetições e bloqueia revisão legada ambígua sem alterar ledger; testes locais, resultado próprio hospedado ainda ausente |
 | IA contextual rastreável | contextual-review/store/workbench, #47 | Código presente, desligado | Autorização, orçamento, citações, injeção e A/B sintéticos; nenhum provedor real testado |
 | QA isolado e recuperação | qa-guard/control, migrations 0008/0009 | Aplicadas em Q0 | Backup cifrado concluído; sem restauração operacional. Não repetir ensaio já aprovado |
-| Desktop/mobile/teclado | access/catalog/session | Inspeção parcial | Desktop/teclado no recorte; dimensão mobile solicitada não se aplicou, logo não aprovado |
-| Homologação, filas e sete dias | jobs/consumer/QA gates | Desligados | Q2/Q3 futuros; nenhuma janela, reserva ou análise criada para validar telas |
+| Desktop/mobile/teclado | access/catalog/session | Inspeção parcial | Desktop e teclado no catálogo/seleção; viewport móvel efetivo não disponível, logo mobile não aprovado |
+| Homologação, filas e sete dias | jobs/consumer/QA gates | Desligados | Q2 autorizado condicionalmente, mas bloqueado. Nenhum job/canário/janela/reserva aberto; Q3/janela formal e Q4 sem ativação |
+| Diagnóstico por tentativa | analysis-jobs, qa-metrics, consumer, #47 | Ainda sem novo campo | Branch acrescenta claim admitido, entrega nativa e fonte separadas; duplicatas não viram tentativas fictícias. CPU permanece não medida |
 
 ## Catálogo e consentimento
 
@@ -26,4 +27,10 @@ A busca é explicitamente sobre páginas carregadas da instalação selecionada.
 
 ## Critérios ainda abertos
 
-A [auditoria Q1](auditoria-cumulativa-q1-2026-10-26.md) registra achados, estado de dependências e propostas Q2/Q3/Q4. Defeitos P1 do Q0 e pendências hospedadas impedem chamar o candidato de pronto ou o piloto de homologado. Uma CI nova só valida seu próprio SHA; não altera o QA. Não há autorização de nova implantação, IA real ou início de janela nesta entrega.
+A [auditoria Q1](auditoria-cumulativa-q1-2026-10-26.md) preserva achados e evidências históricas. O deploy corretivo supera sua pendência antiga de implantação. O [gate Q2 atual](qa-candidato-2026-10-26.md#gate-atual-q2) distingue teto persistido de quatro tentativas, reentrega de transporte, CPU medida, captura nativa, consumo e encerramento. Falta de prova bloqueia somente a ativação dependente; regressões e evolução local continuam. Uma CI nova valida seu próprio SHA e não altera o QA. Publicação incremental na PR existente não autoriza outro deploy, IA real ou sete dias.
+
+## Próximos pacotes separados
+
+Q3: somente após resultados legítimos e compatibilidade Q2 medida, homologar leitura, Markdown baixado e aberto, orientador, revisão persistida, comparação, idempotência/reentrega, cancelamento, timeout, revogação e recuperação. Mudança de decisão/revogação/novos jobs requer escopo específico; não adicioná-los ao canário. Janela de sete dias e50jobs/dia total depende de início/fim D1 reais, capacidade/margem compartilhada e desligamento externo de cron/dispatcher previamente aprovado. Não homologar observação futura por simulação ou apenas dois resultados.
+
+Q4: manter modelo contextual off até projeto/modelo/preço atuais, dados mínimos por fixture/commit, retenção/purga e teto financeiro expressamente aprovados. Usar a integração existente sem tools, reserva idempotente e resultado desconhecido sem retry cobrado cego; nenhuma geração confirma vulnerabilidade, muda decisão humana ou aplica patch. Mocks validam contratos e isolamento, não qualidade de modelo real. R$0 atual significa zero chamadas reais. [Detalhes de contexto e orçamento](ia-contextual-integracao.md).

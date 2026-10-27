@@ -5,9 +5,9 @@ Experimental review of **authorized** repository evidence. Target code is read a
 ## Delivery states
 
 - Public production v15 is preserved. A public repository or draft PR does not mean the website runs that code.
-- Isolated QA runs corrective Q1 commit `f2e11f71112278fd7e00130ba615ca4cdd4b416b`. Jobs, cron, Queue consumers, canary, pilot window and model calls remain off.
+- Isolated QA runs exact commit `8ac53f9ad5a0ded0ea50242797f902d0756c0c42`, including sanitized attempt correlation. Both Workers were verified at 100% traffic. Jobs, metrics, logs, cron, Queue consumers, canary, pilot window and model calls remain off; no additional migration was applied.
 - A and B login/catalog/metadata selection have been exercised at different times. Separate profiles, complete hosted negative tests, mobile and per-invocation CPU evidence remain open. Conditional Q2 authorization has not started a canary.
-- Attempt-correlation improvements on draft PR #47 are reviewable code after that deployment. They are not deployed or approved for activation. The existing PR chain is preserved; no merge or release is implied.
+- B repeated private catalog and metadata selection on that candidate; A still needs a separate connected profile while B is preserved. Authenticated negative requests lack a supported test transport. CPU collection capability must be verified before activation, while actual CPU is measured during the canary; no nonexistent job measurement is required as a precondition. Native capture privacy remains unproven. Later documentation commits do not change the deployed application or authorize another deployment. The draft PR chain is preserved; no merge or release is implied.
 
 ## GitHub access
 

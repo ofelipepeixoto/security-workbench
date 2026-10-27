@@ -12,7 +12,7 @@ import ts from 'typescript';
 // or browser/effect tests. No provider, credentials, network, or new dependency.
 const webRoot = fileURLToPath(new URL('../', import.meta.url));
 const output = await mkdtemp(join(webRoot, '.catalog-experience-'));
-let GitHubCatalog, createCatalogMetadataSelection, createCatalogRequestScope, emptyCatalogPage, validateCatalogPage, mergeCatalogPage, failedCatalogPage, catalogFailureScope;
+let GitHubCatalog, createCatalogMetadataSelection, createCatalogRequestScope, emptyCatalogPage, validateCatalogPage, mergeCatalogPage, failedCatalogPage, catalogFailureScope, createQaClosedCheckAttempt, isExpectedQaClosedCheckError, QaClosedCheck;
 try {
   for (const file of ['components/github-catalog.tsx', 'components/github-catalog-controller.tsx']) {
     const result = ts.transpileModule(await readFile(join(webRoot, file), 'utf8'), {
@@ -29,7 +29,7 @@ try {
     await writeFile(target, result.outputText);
   }
   ({ GitHubCatalog } = await import(pathToFileURL(join(output, 'components/github-catalog.mjs')).href));
-  ({ createCatalogMetadataSelection, createCatalogRequestScope, emptyCatalogPage, validateCatalogPage, mergeCatalogPage, failedCatalogPage, catalogFailureScope } = await import(pathToFileURL(join(output, 'components/github-catalog-controller.mjs')).href));
+  ({ createCatalogMetadataSelection, createCatalogRequestScope, emptyCatalogPage, validateCatalogPage, mergeCatalogPage, failedCatalogPage, catalogFailureScope, createQaClosedCheckAttempt, isExpectedQaClosedCheckError, QaClosedCheck } = await import(pathToFileURL(join(output, 'components/github-catalog-controller.mjs')).href));
 } finally {
   await rm(output, { recursive: true, force: true });
 }
@@ -427,4 +427,35 @@ test('metadata selection accepts only a current successful page and its exact re
   const html = renderCatalog(model({ repositories, selection: createCatalogMetadataSelection(item, repositories, 11), status: { enabled: true, connection: { state: 'revoked' }, jobs_enabled: false, limits } }), true);
   assert.doesNotMatch(html, /synthetic-account-a\/fixture-9|Preparar análise de|Repositório selecionado:/);
   assert.match(html, /acesso aos repositórios foi revogado/);
+});
+
+// Manual closed-QA protocol; fake HTTP responses, not a hosted negative test.
+const checkProof=(action='qa-closed-check')=>({action,source_revision:'d'.repeat(40),checked_at:'2026-10-26T12:00:00Z',fixture:{repositoryId:21,installationId:11}});
+function checkError(action,patch={}){return Object.assign(new Error(action==='enqueue-job'?'A execução por jobs não está ativada neste ambiente.':'QA fechado'),{status:action==='enqueue-job'?503:403,...(action==='catalog-authorize'?{code:'qa_closed'}:{}),qaCheck:checkProof(action),...patch});}
+test('closed QA UI has an explicit keyboard button and SSR never initiates the protocol',()=>{
+ let calls=0;const html=renderToStaticMarkup(React.createElement(QaClosedCheck,{call:()=>{calls++;}}));
+ assert.equal(calls,0);assert.match(html,/<button[^>]*>Executar duas negativas do QA fechado<\/button>/);assert.match(html,/Aguardando ação explícita/);assert.match(html,/Sem polling ou retentativa/);
+});
+test('manual protocol uses the same client exactly once per step, no arbitrary fields, and keeps expected errors rejected',async()=>{
+ const calls=[],receipts=[],attempt=createQaClosedCheckAttempt(),signal=new AbortController().signal;
+ const call=async payload=>{calls.push(payload);if(payload.action==='qa-closed-check')return {check:{...checkProof(),fixture:{...checkProof().fixture,url:'https://untrusted.invalid',action:'delete-project',projectId:'fabricated'}}};throw checkError(payload.action);};
+ const result=await attempt.run(call,signal,()=>true,r=>receipts.push(r));
+ assert.deepEqual(calls.map(p=>p.action),['qa-closed-check','catalog-authorize','enqueue-job']);assert.equal(receipts.length,2);assert.equal(result[1].code,null);
+ assert.deepEqual(Object.keys(calls[1]).sort(),['action','installationId','qaClosedCheck','repositoryId']);
+ await assert.rejects(attempt.run(call,signal,()=>true),/já foi solicitada/);assert.equal(calls.length,3);
+ const expected=checkError('catalog-authorize');assert.equal(isExpectedQaClosedCheckError(calls[1],expected),true);
+ for(const patch of [{qaCheck:undefined},{status:401},{code:undefined},{qaCheck:checkProof('other')},{qaCheck:{...checkProof('catalog-authorize'),fixture:{repositoryId:22,installationId:12}}}])assert.equal(isExpectedQaClosedCheckError(calls[1],checkError('catalog-authorize',patch)),false);
+ assert.equal(isExpectedQaClosedCheckError({action:'catalog-authorize'},expected),false);
+});
+test('expired/CSRF/unexpected/success responses stop before the second negative and never retry',async()=>{
+ for(const failure of [checkError('catalog-authorize',{status:401}),checkError('catalog-authorize',{code:undefined}),checkError('catalog-authorize',{qaCheck:undefined}),checkError('catalog-authorize',{qaCheck:{...checkProof('catalog-authorize'),source_revision:'e'.repeat(40)}}),null]){
+  const calls=[];const call=async p=>{calls.push(p.action);if(p.action==='qa-closed-check')return {check:checkProof()};if(failure)throw failure;return {unexpected:'success'};};
+  await assert.rejects(createQaClosedCheckAttempt().run(call,new AbortController().signal,()=>true),/Resposta inesperada/);assert.deepEqual(calls,['qa-closed-check','catalog-authorize']);
+ }
+ const calls=[];await assert.rejects(createQaClosedCheckAttempt().run(async p=>{calls.push(p);throw Error('QA aberto ou desconhecido');},new AbortController().signal,()=>true));assert.equal(calls.length,1);
+});
+test('session switch during a delayed negative invalidates receipts and stops the remaining request',async()=>{
+ let current=true,release;const pending=new Promise(r=>{release=r;}),calls=[],receipts=[];
+ const work=createQaClosedCheckAttempt().run(async p=>{calls.push(p.action);if(p.action==='qa-closed-check')return {check:checkProof()};await pending;throw checkError(p.action);},new AbortController().signal,()=>current,r=>receipts.push(r));
+ await Promise.resolve();await Promise.resolve();current=false;release();await assert.rejects(work,e=>e.name==='AbortError');assert.equal(receipts.length,0);assert.deepEqual(calls,['qa-closed-check','catalog-authorize']);
 });

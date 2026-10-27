@@ -1,10 +1,10 @@
 # Reconciliação das entregas — atualização Q1/Q2 de 27/10/2026 UTC
 
-Esta matriz substitui o estado de preparação anterior. Cadeia #43 → #44 → #45 → #46 → #47 aberta em rascunho, sem merge. O QA recebeu o commit exato `8ac53f9ad5a0ded0ea50242797f902d0756c0c42`, com correlação sanitizada de tentativas, dois Workers conferidos a 100% e processamento desligado. Esta atualização documental posterior não foi implantada. Produção v15 e main permanecem preservadas e separadas. O piloto não está homologado.
+Esta matriz substitui o estado de preparação anterior. Cadeia #43 → #44 → #45 → #46 → #47 aberta em rascunho, sem merge. QA permanece em `8ac53f9ad5a0ded0ea50242797f902d0756c0c42`, com os dois Workers a 100% e processamento desligado. A nova checagem protegida desta branch é código de aplicação posterior, ainda não implantado. Produção v15 e main permanecem preservadas e separadas. O piloto não está homologado.
 
 | Pedido original | Implementação / PR de origem | QA 8ac53… | Evidência atual e próxima evidência |
 |---|---|---|---|
-| Login, ícone e verde só com sessão validada | github-session-status/monitor, #44 | Parcial | B revalidado no novo deploy; A validado individualmente na versão anterior. Disponibilizar A em outro perfil, mantendo B, para negativos simultâneos |
+| Login, ícone e verde só com sessão validada | github-session-status/monitor, #44 | Parcial | A/B individuais e perfis separados confirmados pelo titular; isolamento continua vinculado às negativas reais, não à separação declarada |
 | Catálogo de repositórios nunca cadastrados | github-app-client/auth, workbench-service, catalog controller, #44/#47 | Implantado | A e B viram sua fixture privada com zero projetos; cobertura selected/parcial informada. Volume/múltiplas instalações são sintéticos |
 | Escolher sem preparar commit/análise | catalog/controller, correção Q1 | Parcial | B escolheu e limpou por Enter no candidato novo, sem processamento. Repetir A; POST autenticado negativo continua bloqueado por capacidade de transporte |
 | A/B, revogação, respostas atrasadas | principal/owner, FKs, request scope, auth | Correções Q1 implantadas | Nenhuma fixture A na listagem B observada; isso não prova negativos completos por IDs. Isolamento entre perfis, consentimentos/permissões completos e revogação real pendentes |
@@ -16,6 +16,7 @@ Esta matriz substitui o estado de preparação anterior. Cadeia #43 → #44 → 
 | Desktop/mobile/teclado | access/catalog/session | Inspeção parcial | Desktop e teclado no catálogo/seleção; viewport móvel efetivo não disponível, logo mobile não aprovado |
 | Homologação, filas e sete dias | jobs/consumer/QA gates | Desligados | Q2 autorizado condicionalmente, mas bloqueado. Nenhum job/canário/janela/reserva aberto; Q3/janela formal e Q4 sem ativação |
 | Diagnóstico por tentativa | analysis-jobs, qa-metrics, consumer, #47 | Implantado, inativo | Claim admitido, entrega nativa e fonte separados. Capacidade nativa de CPU documentada; consulta de chaves sem CPU atual não substitui nem impede por si só futura medição. Privacidade/correlação efetiva continuam gate; CPU real só durante Q2 |
+| Negativas autenticadas com QA fechado | qa-guard, workbench-service, catalog controller e cliente existente, #47 | Não implantado | Código local testa as rotas reais com sessão/CSRF, fixture privada configurada pelo operador, recibo de fonte/horário e parada. Próxima evidência: deploy especificamente aprovado, negativas A/B e contagens administrativas antes/depois |
 
 ## Catálogo e consentimento
 

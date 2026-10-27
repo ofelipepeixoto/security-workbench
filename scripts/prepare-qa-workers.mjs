@@ -78,6 +78,13 @@ export function validatePackagingManifest(m) {
   if(new Set(ids).size!==ids.length||!Array.isArray(production)||ids.some(id=>production.includes(id)))reject();
   if(!/^[a-f0-9]{40}$/.test(m.sourceRevision??''))reject();
   existingAuthSettings(m);
+  if(m.qaClosedCheckFixtures!==undefined) {
+    const f=m.qaClosedCheckFixtures,actors=['171351708','322086368'],owners=['ofelipepeixoto','radartech-news'];
+    if(!Array.isArray(f)||f.length!==2||new Set(f.map(x=>x?.githubId)).size!==2||f.some(x=>
+      !x||Object.keys(x).sort().join(',')!=='githubId,installationId,repo,repositoryId'||!actors.includes(x.githubId)||
+      !Number.isSafeInteger(x.repositoryId)||x.repositoryId<1||!Number.isSafeInteger(x.installationId)||x.installationId<1||
+      x.repo!==`${owners[actors.indexOf(x.githubId)]}/security-workbench-qa-fixture`))reject();
+  }
   return m;
 }
 export function qaMetadata(m,mainModule,compatibility={}) {
@@ -91,6 +98,7 @@ export function qaMetadata(m,mainModule,compatibility={}) {
     ...preserved,
     // Code publication/deployment never activates jobs, telemetry or a model.
     WORKBENCH_JOBS_ENABLED:'false',WORKBENCH_CONTEXTUAL_ENABLED:'false',WORKBENCH_QA_METRICS_ENABLED:'false',WORKBENCH_QA_ENABLED:'true',WORKBENCH_QA_SOURCE_SHA:m.sourceRevision};
+  if(role==='web'&&m.qaClosedCheckFixtures)vars.WORKBENCH_QA_CHECK_FIXTURES=JSON.stringify(m.qaClosedCheckFixtures);
   return {main_module:mainModule,compatibility_date:compatibility.date??'2026-05-15',
     compatibility_flags:compatibility.flags??['nodejs_compat'],
     bindings:[{type:'d1',name:'DB',id:m.databaseId},

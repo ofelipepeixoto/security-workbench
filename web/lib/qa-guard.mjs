@@ -13,6 +13,35 @@ const deny=(code='qa_closed',status=403)=>new AnalysisJobError(code,status);
 export function createQaGuard({env={},db=env.DB,now=()=>new Date()}={}) {
   if(env?.WORKBENCH_QA_ENABLED!=='true') return undefined;
   const time=()=>{const n=new Date(now()).valueOf();if(!Number.isSafeInteger(n))throw deny();return n;};
+  // Private operator configuration; never inferred from a browser-supplied repo.
+  // This enables closed-state checks only, not admission or a pilot period.
+  function closedCheckFixture({githubId,ownerId,provider}={}) {
+    const actor=String(githubId);
+    if(provider!=='github'||!ACTORS.has(actor)||
+      ownerId!==(actor===QA_ALLOWED_GITHUB_IDS[0]?env.WORKBENCH_OWNER_ID:`github:${actor}`))throw deny('qa_scope');
+    let fixtures;try{fixtures=JSON.parse(env.WORKBENCH_QA_CHECK_FIXTURES);}catch{throw deny('qa_scope');}
+    if(!Array.isArray(fixtures)||fixtures.length!==2||new Set(fixtures.map(f=>f?.githubId)).size!==2||fixtures.some(f=>
+      !f||Object.keys(f).sort().join(',')!=='githubId,installationId,repo,repositoryId'||!ACTORS.has(f.githubId)||
+      !Number.isSafeInteger(f.repositoryId)||f.repositoryId<1||!Number.isSafeInteger(f.installationId)||f.installationId<1||
+      typeof f.repo!=='string'||!REPOSITORY_SCOPE.test(f.repo)||f.repo.split('/')[0]!==QA_REPOSITORY_NAMESPACES[QA_ALLOWED_GITHUB_IDS.indexOf(f.githubId)]))throw deny('qa_scope');
+    return {...fixtures.find(f=>f.githubId===actor)};
+  }
+  function closedCheckAvailable(scope) {try{closedCheckFixture(scope);return true;}catch{return false;}}
+  async function closedCheck(scope) {
+    const fixture=closedCheckFixture(scope);
+    if(!/^https:\/\/security-workbench-qa\.[a-z0-9-]+\.workers\.dev$/.test(env.WORKBENCH_ORIGIN??''))throw deny('qa_scope');
+    if(env.WORKBENCH_JOBS_ENABLED!=='false'||!/^[a-f0-9]{40}$/.test(env.WORKBENCH_QA_SOURCE_SHA??''))throw deny('qa_scope',409);
+    let row;try{row=await db.prepare('SELECT * FROM workbench_qa_active_window WHERE id=1').bind().first();}catch{throw deny('storage_unavailable',503);}
+    const n=time();
+    if(row) {
+      const duration=row.mode==='canary'?QA_LIMITS.canaryDurationMs:row.mode==='window'?604800000:null;
+      if(duration===null||!Number.isSafeInteger(row.starts_at)||!Number.isSafeInteger(row.ends_at)||row.ends_at-row.starts_at!==duration||
+        (row.closed_at!==null&&(!Number.isSafeInteger(row.closed_at)||row.closed_at<row.starts_at||row.closed_at>n)))throw deny('storage_unavailable',503);
+      // A future opening is not accepted as a closed test environment either.
+      if(row.closed_at===null&&n<row.ends_at)throw deny('qa_scope',409);
+    }
+    return {fixture,origin:env.WORKBENCH_ORIGIN,source_revision:env.WORKBENCH_QA_SOURCE_SHA,checked_at:new Date(n).toISOString()};
+  }
   async function window() {
     let row;
     try {row=await db.prepare('SELECT * FROM workbench_qa_active_window WHERE id=1').bind().first();}
@@ -70,7 +99,7 @@ export function createQaGuard({env={},db=env.DB,now=()=>new Date()}={}) {
     return repositories.map(repository=>({can_analyze:Boolean(principal&&Array.isArray(fixtures)&&fixtures.some(f=>f.githubId===actor&&f.repositoryId===repository.repositoryId&&f.installationId===repository.installationId&&f.repo===repository.repo&&REPOSITORY_SCOPE.test(f.repo))),reason:'qa_fixture_only'})).map(p=>p.can_analyze?{can_analyze:true,reason:null}:p);
   }
   async function catalogPolicy(scope={}) {return (await catalogPolicies({...scope,repositories:[scope]}))[0];}
-  return {window,check,capacity,reservation,checkJob,dispatch,catalogPolicy,catalogPolicies};
+  return {window,check,capacity,reservation,checkJob,dispatch,catalogPolicy,catalogPolicies,closedCheckFixture,closedCheckAvailable,closedCheck};
 }
 
 /** Per-attempt transport, shared by authorization, refresh and acquisition.

@@ -7,6 +7,83 @@ export type CatalogCall = <T>(payload: object, signal?: AbortSignal, endpoint?: 
 export type CatalogPageResponse<T> = { total_count: number; page: number; next_page: number | null; complete: boolean; synced_at: string; coverage?: CatalogCoverage | CatalogInstallationCoverage; page_limit?: number; limit_reached?: boolean } & T;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHA = /^[0-9a-f]{40}$/i;
+const JOBS_CLOSED_MESSAGE = "A execução por jobs não está ativada neste ambiente.";
+type ClosedCheck = { source_revision: string; checked_at: string; action: string; fixture: { repositoryId: number; installationId: number } };
+type ClosedReceipt = { action: string; expected: boolean; status: number | null; code: string | null; source_revision: string | null; checked_at: string | null };
+function validClosedCheck(value: unknown): value is ClosedCheck {
+  const r=value as ClosedCheck | undefined;
+  return Boolean(r&&SHA.test(r.source_revision)&&Number.isFinite(Date.parse(r.checked_at))&&
+    Number.isSafeInteger(r.fixture?.repositoryId)&&r.fixture.repositoryId>0&&Number.isSafeInteger(r.fixture?.installationId)&&r.fixture.installationId>0);
+}
+/** Expected failures still reject the HTTP call; only their normal catalog
+ * invalidation is suppressed. Auth/CSRF/unknown failures retain normal handling. */
+export function isExpectedQaClosedCheckError(payload: object, cause: unknown) {
+  const p=payload as {action?:string;qaClosedCheck?:boolean;repositoryId?:number;installationId?:number};
+  const e=cause as {status?:number;code?:string;message?:string;qaCheck?:unknown};
+  if(p.qaClosedCheck!==true||!validClosedCheck(e?.qaCheck))return false;
+  const r=e.qaCheck;
+  return r.action===p.action&&r.fixture.repositoryId===p.repositoryId&&r.fixture.installationId===p.installationId&&
+    ((p.action==='catalog-authorize'&&e.status===403&&e.code==='qa_closed')||
+    (p.action==='enqueue-job'&&e.status===503&&e.code===undefined&&e.message===JOBS_CLOSED_MESSAGE));
+}
+export function createQaClosedCheckAttempt() {
+  let used=false;
+  return {async run(call: CatalogCall, signal: AbortSignal, isCurrent:()=>boolean, onReceipt:(r:ClosedReceipt)=>void=()=>{}) {
+    if(used)throw new Error('Esta checagem já foi solicitada. Não houve repetição.');
+    used=true;
+    const current=()=>{if(signal.aborted||!isCurrent())throw new DOMException('Sessão alterada.','AbortError');};
+    current();
+    const result=await call<{check:ClosedCheck}>({action:'qa-closed-check'},signal);
+    current();
+    if(!validClosedCheck(result.check)||result.check.action!=='qa-closed-check')throw new Error('O estado fechado não foi confirmado. Checagem interrompida.');
+    const receipts:ClosedReceipt[]=[];
+    for(const action of ['catalog-authorize','enqueue-job']) {
+      current();const payload={action,qaClosedCheck:true,repositoryId:result.check.fixture.repositoryId,installationId:result.check.fixture.installationId};
+      let failure:unknown;
+      try {await call(payload,signal);}catch(error){failure=error;}
+      current();
+      if(!isExpectedQaClosedCheckError(payload,failure)||(failure as {qaCheck:ClosedCheck}).qaCheck.source_revision!==result.check.source_revision) {
+        const e=failure as {status?:number;code?:string;qaCheck?:unknown}|undefined;
+        const proof=validClosedCheck(e?.qaCheck)?e.qaCheck:null;
+        onReceipt({action,expected:false,status:Number.isSafeInteger(e?.status)&&e!.status!>=100&&e!.status!<=599?e!.status!:null,
+          code:['qa_closed','qa_scope','storage_unavailable','not_found'].includes(e?.code??'')?e!.code!:null,
+          source_revision:proof?.source_revision??null,checked_at:proof?.checked_at??null});
+        throw new Error('Resposta inesperada. Checagem interrompida; não repita. O operador deve conferir o estado antes de continuar.');
+      }
+      const e=failure as {status:number;code?:string;qaCheck:ClosedCheck};
+      const receipt={action,expected:true,status:e.status,code:e.code??null,source_revision:e.qaCheck.source_revision,checked_at:e.qaCheck.checked_at};
+      receipts.push(receipt);onReceipt(receipt);
+    }
+    return receipts;
+  }};
+}
+export function QaClosedCheck({call,captureAccess}: {call:CatalogCall;captureAccess?:()=>()=>boolean}) {
+  const scope=useRef(createCatalogRequestScope(captureAccess)),attempt=useRef(createQaClosedCheckAttempt()),clicked=useRef(false);
+  const [context,setContext]=useState<CatalogCall>(()=>call),[state,setState]=useState('idle'),[receipts,setReceipts]=useState<ClosedReceipt[]>([]);
+  useEffect(()=>{
+    const activeScope=scope.current;activeScope.setCaptureAccess(captureAccess);activeScope.open();attempt.current=createQaClosedCheckAttempt();clicked.current=false;
+    let live=true;
+    // Mask the old context during render; reset only after this epoch is open.
+    void Promise.resolve().then(()=>{if(live){setContext(()=>call);setState('idle');setReceipts([]);}});
+    return ()=>{live=false;activeScope.close();};
+  },[call,captureAccess]);
+  const visible=context===call;
+  async function run() {
+    if(clicked.current||!visible||state!=='idle')return;
+    clicked.current=true;
+    const request=scope.current.begin();setState('running');
+    try {await attempt.current.run(call,request.signal,request.isCurrent,r=>{if(request.isCurrent())setReceipts(previous=>[...previous,r]);});if(request.isCurrent())setState('complete');}
+    catch {if(request.isCurrent())setState('stopped');}
+    finally {request.finish();}
+  }
+  return <section className="panel" aria-label="Checagem de bloqueios do QA"><div className="catalog-body"><h2>Conferir bloqueios antes do canário</h2>
+    <p>Uma ação manual confere sua fixture e o estado fechado, depois solicita as duas negativas nas rotas reais. Não resolve commit nem solicita análise. Cada requisição repete a proteção no servidor.</p>
+    <button className="button secondary" disabled={!visible||state!=='idle'} onClick={()=>void run()}>Executar duas negativas do QA fechado</button>
+    <p role={state==='stopped'?'alert':'status'}>{!visible||state==='idle'?'Aguardando ação explícita.':state==='running'?'Conferindo bloqueios…':state==='complete'?'As duas negativas esperadas foram recebidas. Contadores e isolamento ainda dependem da conferência do operador.':'Checagem interrompida. Não repita; o operador deve conferir sessão, resposta e contadores antes de continuar.'}</p>
+    {visible&&receipts.length>0&&<ul>{receipts.map(r=><li key={r.action}><strong>{r.expected?'Negativa esperada':'Resposta inesperada — checagem interrompida'}</strong>: <code>POST /api/workbench · {r.action}</code>, HTTP {r.status??'não confirmado'}, código {r.code??'não informado'}. Fonte <code>{r.source_revision??'sem recibo válido'}</code> · {r.checked_at??'horário do servidor não confirmado'}</li>)}</ul>}
+    <p>Sem polling ou retentativa. O bloqueio de enqueue ocorre antes de exigir projeto/commit; não foram inventados esses identificadores. Esta checagem não comprova ausência de aquisição externa por contadores globais.</p>
+  </div></section>;
+}
 const pollingDelays = [1500, 3000, 6000, 10000, 15000, 20000];
 export function catalogFailureScope(status?: number, code?: string) {
   if (code === "rate_limited" || status === 429) return "other";
@@ -290,5 +367,6 @@ export function GitHubCatalogController({ call, demo, sessionUnavailable, initia
     }),
   };
   const visible = contextMatches && !sessionUnavailable;
-  return <GitHubCatalog embedded={embedded} model={{ demo, status: visible ? status : null, statusLoading: !sessionUnavailable && (!contextMatches || statusLoading), error: visible ? error : "", notice: visible ? notice : "", busy, installations: visible ? installations : emptyCatalogPage(), repositories: visible ? repositories : emptyCatalogPage(), installationId: visible ? installationId : null, filters, selection: visible ? selection : null, job: visible ? job : null, pollingPaused: polls >= pollingDelays.length || pollFailed }} actions={actions} />;
+  return <><GitHubCatalog embedded={embedded} model={{ demo, status: visible ? status : null, statusLoading: !sessionUnavailable && (!contextMatches || statusLoading), error: visible ? error : "", notice: visible ? notice : "", busy, installations: visible ? installations : emptyCatalogPage(), repositories: visible ? repositories : emptyCatalogPage(), installationId: visible ? installationId : null, filters, selection: visible ? selection : null, job: visible ? job : null, pollingPaused: polls >= pollingDelays.length || pollFailed }} actions={actions} />
+    {!embedded&&!demo&&visible&&status?.qa_closed_check_available&&status.jobs_enabled===false&&status.connection.state==='connected'&&<QaClosedCheck call={call} captureAccess={captureAccess}/>}</>;
 }

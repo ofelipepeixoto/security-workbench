@@ -92,7 +92,7 @@ function validateMetadata(metadata, repo, expectedId) {
   return metadata;
 }
 
-export function createWorkbenchService({ db, ownerId, user = { userId: ownerId }, githubApp, jobsEnabled = false, dispatchJob, qaGuard, contextual, getFreshUser, scanner = defaultScanner, now = () => new Date(), uuid = () => crypto.randomUUID() }) {
+export function createWorkbenchService({ db, ownerId, user = { userId: ownerId }, githubApp, jobsEnabled = false, dispatchJob, qaGuard, contextual, getFreshUser, recordQaClosedCheck, qaCheckOrigin, scanner = defaultScanner, now = () => new Date(), uuid = () => crypto.randomUUID() }) {
   if (typeof ownerId !== 'string' || !ownerId) throw new WorkbenchError('Entre para acessar o Workbench.', 401);
   if (!db?.prepare) throw new WorkbenchError('O armazenamento está indisponível. Tente novamente mais tarde.', 503);
   const stamp = () => now().toISOString();
@@ -106,6 +106,22 @@ export function createWorkbenchService({ db, ownerId, user = { userId: ownerId }
     return saved;
   };
   const appEnabled = githubApp?.enabled === true;
+  const closedScope={ownerId,githubId:user.githubId,provider:user.provider};
+  async function closedCheckPreflight(payload) {
+    if(!appEnabled||jobsEnabled!==false||typeof dispatchJob!=='function'||typeof qaGuard?.closedCheck!=='function')throw new AnalysisJobError('qa_scope',403);
+    const preflight=payload.action==='qa-closed-check';
+    const keys=preflight?['action']:['action','qaClosedCheck','repositoryId','installationId'];
+    if(Object.keys(payload).some(key=>!keys.includes(key))||(!preflight&&(payload.qaClosedCheck!==true||!['catalog-authorize','enqueue-job'].includes(payload.action))))throw new WorkbenchError('Checagem de QA inválida.');
+    const initial=await qaGuard.closedCheck(closedScope),fixture=initial.fixture;
+    if(initial.origin!==qaCheckOrigin)throw new AnalysisJobError('qa_scope',403);
+    if(!preflight&&(payload.repositoryId!==fixture.repositoryId||payload.installationId!==fixture.installationId))throw new AnalysisJobError('qa_scope',403);
+    // Metadata authorization uses the real App client, without resolving SHA or
+    // acquiring code. Authentication refresh may legitimately update its lease.
+    const access=await (await appClient()).checkRepositoryAccess({installationId:fixture.installationId,repositoryId:fixture.repositoryId});
+    if(access.repository.id!==fixture.repositoryId||access.repository.full_name!==fixture.repo||access.repository.private!==true)throw new AnalysisJobError('qa_scope',403);
+    const final=await qaGuard.closedCheck(closedScope);
+    return {source_revision:final.source_revision,checked_at:final.checked_at,action:payload.action,fixture:{repositoryId:fixture.repositoryId,installationId:fixture.installationId}};
+  }
   let client, contextualExecution;
   const appClient = async () => {
     if (!appEnabled) throw new WorkbenchError('Conexão de repositórios indisponível neste ambiente.', 503);
@@ -254,13 +270,16 @@ export function createWorkbenchService({ db, ownerId, user = { userId: ownerId }
       }) };
     },
     async act(payload) {
+      const closedCheck=Object.hasOwn(payload,'qaClosedCheck');
+      if(payload.action==='qa-closed-check')return {check:await closedCheckPreflight(payload)};
+      if(closedCheck)recordQaClosedCheck?.(await closedCheckPreflight(payload));
       // The QA window exercises only selected App fixtures. Legacy acquisition,
       // REA import and permanent evidence deletion cannot bypass its ledger.
       if (qaGuard && ['inspect','authorize','scan','import-rea','delete-project'].includes(payload.action)) throw new AnalysisJobError('qa_scope',403);
       switch (payload.action) {
         case 'contextual-read': case 'contextual-generate': case 'contextual-delete': return contextualReview(payload);
         case 'catalog-status': {
-          return {catalog: {enabled: appEnabled, connection: appEnabled ? await githubApp.getConnection(user) : {state: 'unavailable'}, jobs_enabled: appEnabled && jobsEnabled === true && typeof dispatchJob === 'function', analysis_policy: qaGuard ? 'qa_selected_fixtures' : 'authorized_repositories', limits: defaultScanner.SCANNER_LIMITS}};
+          return {catalog: {enabled: appEnabled, connection: appEnabled ? await githubApp.getConnection(user) : {state: 'unavailable'}, jobs_enabled: appEnabled && jobsEnabled === true && typeof dispatchJob === 'function', qa_closed_check_available:qaGuard?.closedCheckAvailable?.(closedScope)===true, analysis_policy: qaGuard ? 'qa_selected_fixtures' : 'authorized_repositories', limits: defaultScanner.SCANNER_LIMITS}};
         }
         case 'catalog-installations': return (await appClient()).listInstallations({page: payload.page ?? 1});
         case 'catalog-repositories': {
@@ -278,6 +297,7 @@ export function createWorkbenchService({ db, ownerId, user = { userId: ownerId }
         }
         case 'catalog-authorize': {
           if (qaGuard) await qaGuard.check({ownerId,githubId:user.githubId,repositoryId:payload.repositoryId,installationId:payload.installationId});
+          if(closedCheck)throw new WorkbenchError('Checagem interrompida: o controle de preparo passou inesperadamente. Nenhuma aquisição foi iniciada.',409);
           const access = await (await appClient()).authorizeRepository({installationId: payload.installationId, repositoryId: payload.repositoryId, revision: payload.revision, branch: payload.branch});
           const metadata = access.repository;
           if (qaGuard) await qaGuard.check({ownerId,githubId:user.githubId,repositoryId:metadata.id,installationId:payload.installationId,repo:metadata.full_name});
@@ -291,6 +311,7 @@ export function createWorkbenchService({ db, ownerId, user = { userId: ownerId }
         }
         case 'enqueue-job': {
           if (!appEnabled || jobsEnabled !== true || typeof dispatchJob !== 'function') throw new WorkbenchError('A execução por jobs não está ativada neste ambiente.', 503);
+          if(closedCheck)throw new WorkbenchError('Checagem interrompida: o controle de jobs passou inesperadamente. Nenhum job foi solicitado.',409);
           if (payload.confirmed !== true || typeof payload.revision !== 'string' || !SHA.test(payload.revision)) throw new WorkbenchError('Confirme a análise de um commit válido.');
           const scope = await project(payload.projectId);
           if (scope.source !== 'github-app') throw new WorkbenchError('Selecione um repositório conectado pela GitHub App.', 409);
@@ -527,6 +548,8 @@ export function createWorkbenchService({ db, ownerId, user = { userId: ownerId }
  * @param {{reaImportOnly?:boolean,contextualOnly?:boolean}} mode
  */
 export async function handleWorkbenchRequest(request, { getUser, getDb, authorizedOwnerId, accessPolicy, githubApp, jobsEnabled = false, dispatchJob = undefined, qaGuard = undefined, contextual = undefined, scanner = defaultScanner, now = () => new Date(), uuid = () => crypto.randomUUID() }, { reaImportOnly = false, contextualOnly = false } = {}) {
+  let qaCheckReceipt;
+  const reply=(data,status)=>response({...data,...(qaCheckReceipt?{qa_check:qaCheckReceipt}:{})},status);
   try {
     const user = await getUser();
     if (!user?.userId) throw new WorkbenchError('Entre para acessar o Workbench.', 401);
@@ -550,13 +573,13 @@ export async function handleWorkbenchRequest(request, { getUser, getDb, authoriz
       if (payload.action !== undefined && payload.action !== 'import-rea') throw new WorkbenchError('Ação não permitida nesta rota.');
       payload.action = 'import-rea';
     }
-    const service = createWorkbenchService({ db: await getDb(), ownerId: user.userId, user, githubApp, jobsEnabled, dispatchJob, qaGuard, contextual, getFreshUser:getUser, scanner, now, uuid });
+    const service = createWorkbenchService({ db: await getDb(), ownerId: user.userId, user, githubApp, jobsEnabled, dispatchJob, qaGuard, contextual, getFreshUser:getUser, recordQaClosedCheck:receipt=>{qaCheckReceipt=receipt;}, qaCheckOrigin:new URL(request.url).origin, scanner, now, uuid });
     return response(request.method === 'GET' && !contextualOnly ? await service.list() : await service.act(payload));
   } catch (error) {
-    if (error instanceof GitHubAppError) return response({error: error.message, code: error.code, ...(error.retryAt ? {retry_at: error.retryAt} : {})}, error.status);
-    if (error instanceof AnalysisJobError) return response({error: error.message, code: error.code}, error.status);
-    if (error instanceof ContextualReviewError) return response({error:'Revisão contextual não encontrada ou indisponível para este acesso.',code:error.status===404?'not_found':error.code},error.status);
-    return response({ error: error instanceof WorkbenchError ? error.message : 'Não foi possível concluir a solicitação. Tente novamente.', ...(error instanceof WorkbenchError && error.code ? {code: error.code} : {}) }, error instanceof WorkbenchError ? error.status : 500);
+    if (error instanceof GitHubAppError) return reply({error: error.message, code: error.code, ...(error.retryAt ? {retry_at: error.retryAt} : {})}, error.status);
+    if (error instanceof AnalysisJobError) return reply({error: error.message, code: error.code}, error.status);
+    if (error instanceof ContextualReviewError) return reply({error:'Revisão contextual não encontrada ou indisponível para este acesso.',code:error.status===404?'not_found':error.code},error.status);
+    return reply({ error: error instanceof WorkbenchError ? error.message : 'Não foi possível concluir a solicitação. Tente novamente.', ...(error instanceof WorkbenchError && error.code ? {code: error.code} : {}) }, error instanceof WorkbenchError ? error.status : 500);
   }
 }
 

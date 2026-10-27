@@ -101,3 +101,14 @@ test('the approved App scope belongs to the private manifest and must exactly ma
  const dormant=manifest();delete dormant.approvedGitHubApp;
  assert.equal(qaMetadata(dormant,'qa-entry.mjs').bindings.find(b=>b.name==='GITHUB_APP_ENABLED').text,'false');
 });
+
+test('closed checks add only a private web fixture binding and never activate processing or consumer',()=>{
+ const fixtures=['171351708','322086368'].map((githubId,i)=>({githubId,repositoryId:21+i,installationId:11+i,repo:`${['ofelipepeixoto','radartech-news'][i]}/security-workbench-qa-fixture`}));
+ const m={...manifest(),qaClosedCheckFixtures:fixtures};
+ const web=qaMetadata(m,'qa-entry.mjs'),consumer=qaMetadata(m,'analysis-worker.mjs');
+ assert.deepEqual(JSON.parse(web.bindings.find(b=>b.name==='WORKBENCH_QA_CHECK_FIXTURES').text),fixtures);
+ assert.equal(consumer.bindings.some(b=>b.name==='WORKBENCH_QA_CHECK_FIXTURES'),false);
+ assert.equal(qaMetadata(manifest(),'qa-entry.mjs').bindings.some(b=>b.name==='WORKBENCH_QA_CHECK_FIXTURES'),false);
+ for(const changes of [{githubId:'other'},{repo:'unrelated/private'},{installationId:0},{extra:'not permitted'}])assert.throws(()=>qaMetadata({...m,qaClosedCheckFixtures:[{...fixtures[0],...changes},fixtures[1]]},'qa-entry.mjs'));
+ assert.equal(web.bindings.find(b=>b.name==='WORKBENCH_JOBS_ENABLED').text,'false');assert.deepEqual(web.observability,{enabled:false});
+});

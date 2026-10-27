@@ -138,8 +138,8 @@ export function renderReviewGuidanceMarkdown(run) {
   const states = { ready: 'Orientações disponíveis', empty: 'Nenhum candidato registrado para orientar; isso não comprova segurança.', insufficient_context: 'Contexto insuficiente ou regra não suportada.', unavailable: 'Orientação indisponível: análise concluída e candidatos não estão disponíveis.' };
   const lines = ['## Orientação automática por regras', '',
     `Contrato: ${guidance.schema} · política: ${guidance.policy_version} · método: ${guidance.method}.`,
-    'A orientação é gerada automaticamente, sem revisão humana prévia. Nenhum modelo de IA foi chamado. Ela não confirma candidatos, não altera decisões e não aplica patches.',
-    'Revisão contextual por modelo: não executada. Não faz parte desta orientação por regras.',
+    'A orientação é gerada automaticamente, sem revisão humana prévia. Esta camada por regras não chama modelos de IA. Ela não confirma candidatos, não altera decisões e não aplica patches.',
+    'A revisão contextual por modelo é uma camada separada. Consulte seu estado e suas referências no painel próprio; este bloco contém somente a orientação por regras.',
     states[guidance.state], '',
     `Origem: ${guidance.context.source} · commit: ${guidance.context.revision ?? 'indisponível'} (${guidance.context.revision_state}) · cobertura: ${guidance.context.coverage}. Conteúdo-fonte completo indisponível ao orientador.`,
     `Suportadas: ${guidance.summary.supported}; contexto insuficiente: ${guidance.summary.insufficient_context}; não suportadas: ${guidance.summary.unsupported}; omitidas pelo limite: ${guidance.summary.omitted}.`, ''];

@@ -17,6 +17,58 @@ const MIME=Object.freeze({'.js':'text/javascript; charset=utf-8','.mjs':'text/ja
   '.woff':'font/woff','.woff2':'font/woff2','.txt':'text/plain; charset=utf-8'});
 export const QA_WORKER_NAMES=Object.freeze({web:'security-workbench-qa',consumer:'security-workbench-analysis-qa',queue:'security-workbench-analysis-qa'});
 const reject=()=>{throw Error('QA packaging rejected: verify the approved account, distinct QA resources, origin and source revision.');};
+const PRESERVED_FLAGS=new Set(['GITHUB_LOGIN_ENABLED','GITHUB_APP_ENABLED','WORKBENCH_MULTIUSER_ENABLED']);
+const PRESERVED_SCOPE=Object.freeze({GITHUB_OWNER_ID:'171351708',WORKBENCH_OWNER_ID:'qa:ofelipepeixoto'});
+const APP_SCOPE_NAMES=Object.freeze({GITHUB_APP_ID:'appId',GITHUB_APP_SLUG:'slug',GITHUB_APP_KEY_VERSION:'keyVersion'});
+const PRESERVED_NAMES=new Set([...PRESERVED_FLAGS,...Object.keys(PRESERVED_SCOPE),...Object.keys(APP_SCOPE_NAMES),'GITHUB_LOGIN_CLIENT_ID','GITHUB_APP_CLIENT_ID','WORKBENCH_ORIGIN','WORKBENCH_PILOT_GITHUB_IDS','GITHUB_SESSION_VERSION']);
+const REQUIRED_SNAPSHOT=['GITHUB_LOGIN_ENABLED','GITHUB_APP_ENABLED','WORKBENCH_MULTIUSER_ENABLED','GITHUB_OWNER_ID','WORKBENCH_OWNER_ID','WORKBENCH_ORIGIN','WORKBENCH_PILOT_GITHUB_IDS'];
+function approvedAppScope(m) {
+  const app=m.approvedGitHubApp;
+  if(app===undefined)return null;
+  if(!app||typeof app!=='object'||Array.isArray(app)||Object.keys(app).length!==3||Object.keys(app).some(k=>!['appId','slug','keyVersion'].includes(k))||
+    typeof app.appId!=='string'||!/^[1-9][0-9]{0,11}$/.test(app.appId)||
+    typeof app.slug!=='string'||!/^[a-z0-9](?:[a-z0-9-]{0,98}[a-z0-9])?$/.test(app.slug)||
+    typeof app.keyVersion!=='string'||!/^[1-9][0-9]{0,11}$/.test(app.keyVersion))reject();
+  return app;
+}
+/** A reviewed read-only snapshot, never a request to activate authentication.
+ * Offline validation cannot prove its remote provenance: the caller must bind
+ * this exact snapshot to the confirmed account/Workers in the private review.
+ */
+function existingAuthSettings(m) {
+  const app=approvedAppScope(m);
+  if(m.existingPlainBindings===undefined)return null;
+  if(!app)reject();
+  const snapshot=m.existingPlainBindings;
+  if(!snapshot||typeof snapshot!=='object'||Array.isArray(snapshot)||Object.keys(snapshot).length!==2||Object.keys(snapshot).some(k=>!['web','consumer'].includes(k)))reject();
+  const all={};
+  for(const role of ['web','consumer']) {
+    const rows=snapshot[role];
+    if(!Array.isArray(rows)||rows.length>13)reject();
+    const values={};
+    for(const binding of rows) {
+      if(!binding||typeof binding!=='object'||Array.isArray(binding)||Object.keys(binding).some(k=>!['name','type','text'].includes(k))||
+        binding.type!=='plain_text'||!PRESERVED_NAMES.has(binding.name)||Object.hasOwn(values,binding.name)||typeof binding.text!=='string'||!binding.text||binding.text.length>200||/[\r\n\0]/.test(binding.text))reject();
+      const {name,text}=binding;
+      if(PRESERVED_FLAGS.has(name)&&!['true','false'].includes(text))reject();
+      if(Object.hasOwn(PRESERVED_SCOPE,name)&&text!==PRESERVED_SCOPE[name])reject();
+      if(Object.hasOwn(APP_SCOPE_NAMES,name)&&text!==app[APP_SCOPE_NAMES[name]])reject();
+      if(name==='GITHUB_SESSION_VERSION'&&!/^[1-9][0-9]{0,11}$/.test(text))reject();
+      if(name==='WORKBENCH_ORIGIN'&&text!==m.origin)reject();
+      if(name==='WORKBENCH_PILOT_GITHUB_IDS') {
+        const actors=text.split(',');
+        if(!actors.length||new Set(actors).size!==actors.length||actors.some(id=>!['171351708','322086368'].includes(id)))reject();
+      }
+      if(['GITHUB_LOGIN_CLIENT_ID','GITHUB_APP_CLIENT_ID'].includes(name)&&(!/^[A-Za-z0-9._-]{3,100}$/.test(text)||/^(?:github_pat_|gh[pousr]_|sk-)/i.test(text)))reject();
+      values[name]=text;
+    }
+    if(REQUIRED_SNAPSHOT.some(name=>!Object.hasOwn(values,name)))reject();
+    if(values.GITHUB_LOGIN_ENABLED==='true'&&!values.GITHUB_LOGIN_CLIENT_ID)reject();
+    if(values.GITHUB_APP_ENABLED==='true'&&['GITHUB_APP_ID','GITHUB_APP_SLUG','GITHUB_APP_CLIENT_ID','GITHUB_APP_KEY_VERSION'].some(name=>!values[name]))reject();
+    all[role]=values;
+  }
+  return all;
+}
 export function validatePackagingManifest(m) {
   if(!m||!/^[a-f0-9]{32}$/.test(m.accountId??'')||!UUID.test(m.databaseId??'')||!UUID.test(m.restoreDatabaseId??'')||
     (m.queuePending===true?m.queueId!==undefined:!RESOURCE.test(m.queueId??''))||m.queueName!==QA_WORKER_NAMES.queue||
@@ -24,22 +76,43 @@ export function validatePackagingManifest(m) {
   const ids=[m.databaseId,m.restoreDatabaseId,...(m.queuePending===true?[]:[m.queueId])];
   const production=m.productionResourceIds??(m.productionManagedBySites===true?[]:null);
   if(new Set(ids).size!==ids.length||!Array.isArray(production)||ids.some(id=>production.includes(id)))reject();
-  if(m.sourceRevision!==undefined&&!/^[a-f0-9]{40}$/.test(m.sourceRevision))reject();
+  if(!/^[a-f0-9]{40}$/.test(m.sourceRevision??''))reject();
+  existingAuthSettings(m);
+  if(m.qaClosedCheckFixtures!==undefined) {
+    const f=m.qaClosedCheckFixtures,actors=['171351708','322086368'],owners=['ofelipepeixoto','radartech-news'];
+    if(!Array.isArray(f)||f.length!==2||new Set(f.map(x=>x?.githubId)).size!==2||f.some(x=>
+      !x||Object.keys(x).sort().join(',')!=='githubId,installationId,repo,repositoryId'||!actors.includes(x.githubId)||
+      !Number.isSafeInteger(x.repositoryId)||x.repositoryId<1||!Number.isSafeInteger(x.installationId)||x.installationId<1||
+      x.repo!==`${owners[actors.indexOf(x.githubId)]}/security-workbench-qa-fixture`))reject();
+  }
   return m;
 }
 export function qaMetadata(m,mainModule,compatibility={}) {
   validatePackagingManifest(m);
-  const vars={WORKBENCH_QA_ENABLED:'true',WORKBENCH_JOBS_ENABLED:'false',WORKBENCH_MULTIUSER_ENABLED:'false',
+  const role=mainModule==='qa-entry.mjs'?'web':mainModule==='analysis-worker.mjs'?'consumer':null;
+  if(!role)reject();
+  const preserved=existingAuthSettings(m)?.[role]??{};
+  const vars={WORKBENCH_MULTIUSER_ENABLED:'false',
     GITHUB_APP_ENABLED:'false',GITHUB_LOGIN_ENABLED:'false',WORKBENCH_OWNER_ID:'qa:ofelipepeixoto',
     GITHUB_OWNER_ID:'171351708',WORKBENCH_PILOT_GITHUB_IDS:'171351708,322086368',WORKBENCH_ORIGIN:m.origin,
-    ...(m.sourceRevision?{WORKBENCH_QA_SOURCE_SHA:m.sourceRevision}:{})};
+    ...preserved,
+    // Code publication/deployment never activates jobs, telemetry or a model.
+    WORKBENCH_JOBS_ENABLED:'false',WORKBENCH_CONTEXTUAL_ENABLED:'false',WORKBENCH_QA_METRICS_ENABLED:'false',WORKBENCH_QA_ENABLED:'true',WORKBENCH_QA_SOURCE_SHA:m.sourceRevision};
+  if(role==='web'&&m.qaClosedCheckFixtures)vars.WORKBENCH_QA_CHECK_FIXTURES=JSON.stringify(m.qaClosedCheckFixtures);
   return {main_module:mainModule,compatibility_date:compatibility.date??'2026-05-15',
     compatibility_flags:compatibility.flags??['nodejs_compat'],
     bindings:[{type:'d1',name:'DB',id:m.databaseId},
       ...(m.queuePending===true?[]:[{type:'queue',name:'ANALYSIS_QUEUE',queue_name:m.queueName}]),
       ...Object.entries(vars).map(([name,text])=>({type:'plain_text',name,text}))],
-    observability:{enabled:false},logpush:false,
+    keep_bindings:['secret_text'],observability:{enabled:false},logpush:false,
     tags:['security-workbench-qa','preactivation',...(m.sourceRevision?[`source:${m.sourceRevision}`]:[])]};
+}
+/** Stable private review digests; neither module contents nor secrets are logged. */
+export function qaPackageDigests(payload) {
+  const sha=value=>createHash('sha256').update(value).digest('hex');
+  const worker=key=>({name:payload[key].name,metadataSha256:sha(JSON.stringify(payload[key].metadata)),
+    modules:payload[key].modules.map(m=>({name:m.name,bytes:Buffer.byteLength(m.content),sha256:sha(m.content)})).sort((a,b)=>a.name.localeCompare(b.name))});
+  return {sourceRevision:payload.sourceRevision,web:worker('web'),consumer:worker('consumer'),payloadSha256:sha(JSON.stringify(payload))};
 }
 export function createQaEntryModule(assets,origin,handlerImport='./index.js') {
   // Static paths are exact own-property matches. No network fallback, arbitrary
@@ -106,7 +179,7 @@ export async function prepareQaWorkers(m,{root=ROOT}={}) {
   const payload={accountId:m.accountId,sourceRevision:m.sourceRevision??null,
     web:{name:QA_WORKER_NAMES.web,metadata:metadata('qa-entry.mjs'),modules},
     consumer:{name:QA_WORKER_NAMES.consumer,metadata:metadata('analysis-worker.mjs'),modules:[{name:'analysis-worker.mjs',content:bundled.outputFiles[0].text,type:'application/javascript+module'}]},
-    summary:{serverModules:modules.length,assetFiles:Object.keys(assets).length,assetBytes:bytes,
+    summary:{sourceRevision:m.sourceRevision,existingAuthSettingsPreserved:m.existingPlainBindings!==undefined,contextualAiEnabled:false,serverModules:modules.length,assetFiles:Object.keys(assets).length,assetBytes:bytes,
       restoreDatabaseBound:false,cronConfigured:false,queueBindingConfigured:m.queuePending!==true,queueConsumerAttached:false,networkUsed:false}};
   const serialized=JSON.stringify(payload);
   if(Buffer.byteLength(serialized)>8*1024*1024)throw Error('QA upload payload budget exceeded.');

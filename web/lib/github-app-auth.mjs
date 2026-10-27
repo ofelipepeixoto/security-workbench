@@ -144,17 +144,26 @@ export function createGitHubAppAuth({ config, db, getUser, fetcher = fetch, now 
         if (!row || row.github_id !== user.githubId) return { ...common, state: 'not_connected', connected: false, expires_at: null };
         if (row.expires_at <= stamp()) return { ...common, state: 'expired', connected: false, expires_at: new Date(row.expires_at * 1000).toISOString() };
         const credential = await readToken(user);
+        row = credential.row;
+        // A status request may wait on GitHub while another tab reconnects or
+        // disconnects. Only the exact generation observed here may be purged
+        // or reported as connected after that asynchronous provider check.
+        const generation = 'owner_id = ? AND github_id = ? AND token_envelope = ? AND key_version = ? AND config_key = ? AND expires_at = ? AND created_at = ? AND updated_at = ?';
+        const generationValues = [row.owner_id, row.github_id, row.token_envelope, row.key_version, row.config_key, row.expires_at, row.created_at, row.updated_at];
         // A decryptable envelope alone is not a connected integration. Confirm
         // the provider identity before reporting the connection as usable.
         const client = createGitHubAppClient({ accessToken: credential.token, expectedGitHubId: user.githubId, appId: settings.appId, fetcher, now });
         try { await client.getIdentity(); }
         catch (error) {
           if (error instanceof GitHubAppError && error.code === 'disconnected') {
-            await write('DELETE FROM workbench_github_app_connections WHERE owner_id = ?', user.userId);
+            const removed = await write(`DELETE FROM workbench_github_app_connections WHERE ${generation}`, ...generationValues);
+            if (removed.meta?.changes !== 1) throw new GitHubAppError('unavailable');
             return { ...common, state: row.expires_at <= stamp() ? 'expired' : 'revoked', connected: false, expires_at: null };
           }
           throw error;
         }
+        if (!await first(`SELECT 1 AS current_generation FROM workbench_github_app_connections WHERE ${generation}`, ...generationValues)) throw new GitHubAppError('unavailable');
+        if (row.expires_at <= stamp()) return { ...common, state: 'expired', connected: false, expires_at: new Date(row.expires_at * 1000).toISOString() };
         return { ...common, state: 'connected', connected: true, expires_at: new Date(row.expires_at * 1000).toISOString(), validated_at: new Date(now()).toISOString() };
       } catch (error) {
         if (error instanceof GitHubAppError && error.code === 'disconnected') return { ...common, state: 'not_connected', connected: false, expires_at: null };

@@ -140,3 +140,15 @@ e recuperação do consumidor real, autorização GitHub App/revogação, limite
 restauração ensaiados, exportação aberta/conferida e aceite explícito para ativar.
 Mocks ou existência de coluna owner não equivalem a esses aceites. Lançamento
 multiusuário é marco posterior; nenhuma produção foi alterada neste ADR.
+
+## Adendo Q1 — fronteiras e decisões verificadas (26/10/2026)
+
+Q0 implantou o candidato cumulativo e aplicou 0008/0009 exclusivamente no QA. Este adendo não autoriza repetir essas operações. Produção permanece restrita; configuração, sessões e dados não são derivados da branch de desenvolvimento. D1 continua fonte única de estado hospedado; Supabase e executor VPS para análises não foram acrescentados.
+
+A seleção local de metadados não é uma capability de execução. O catálogo retorna apenas dados autorizados e a interface guarda uma projeção da página/instalação/epoch atuais; preparar SHA e enfileirar repetem guardas independentes. Sem janela/fixture aprovada no servidor, analisar continua negado. Nenhuma alteração Q1 amplia o limite de 16 requisições/45 segundos.
+
+O status da App é vinculado à geração exata da conexão lida: uma resposta atrasada não pode remover ou declarar válida a geração seguinte. A checagem final usa SQL condicional e não nova chamada GitHub. Cada ocorrência nativa tem identidade distinta; resultados legados ambíguos preservam ledger e evidência, expõem a decisão histórica separada e recusam revisão/comparação ambíguas. O ordinal não comprova identidade semântica entre commits.
+
+Scanner/evidências, orientador por regras e modelo contextual são fronteiras diferentes. Dados do alvo permanecem não confiáveis. Código, README e achados não autorizam ferramentas, requisições, gasto ou alteração de decisão. A ausência de provedor real/resultado hospedado limita o aceite; mocks não substituem Q4.
+
+Ver [auditoria cumulativa e riscos residuais](auditoria-cumulativa-q1-2026-10-26.md). Backup cifrado Q0 não comprova restauração operacional. Rollback futuro deve preservar schema, ledgers, decisões e evidências; nenhuma restauração destrutiva está implícita.

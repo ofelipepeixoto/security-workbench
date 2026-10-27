@@ -11,3 +11,9 @@ Inclua, pelo canal privado: versão ou commit afetado, impacto, passos mínimos 
 ## Escopo dos relatos
 
 São relevantes falhas no código, na autenticação, na aquisição GitHub, na proteção contra acesso fora do escopo, na redação de dados e na persistência de resultados. Para falhas em um site ou repositório de terceiros analisado pelo Workbench, siga a política de divulgação do respectivo proprietário; não as envie como issue pública aqui.
+
+## Modelo de ameaças e verificação cumulativa
+
+O [registro Q1](docs/auditoria-cumulativa-q1-2026-10-26.md) distingue achados reproduzidos, avisos de dependências e lacunas de evidência. Fronteiras críticas: navegador→sessão/origem, usuário→instalação/repositório, conexão→geração/lease, código não confiável→parser, revisão→identidade da ocorrência e contexto→reserva de custo/resultado autorizado. Testes de isolamento e contratos sintéticos não comprovam homologação hospedada.
+
+Publicar correção na PR não corrige automaticamente produção/QA. Não usar detalhes operacionais, credenciais ou bancos como evidência pública. Smokes de aquisição real exigem autorização própria e disparo manual; a CI automática desta branch permanece local/sintética.

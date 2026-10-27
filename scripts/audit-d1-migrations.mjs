@@ -1,15 +1,14 @@
 /** Local-only migration audit: ephemeral Miniflare D1, synthetic data, no Sites. */
 import assert from 'node:assert/strict';
 import {createHash, randomUUID} from 'node:crypto';
-import {readFile, realpath} from 'node:fs/promises';
+import {readFile, realpath, readdir} from 'node:fs/promises';
 import {createRequire} from 'node:module';
 import {fileURLToPath} from 'node:url';
 
 const summary = {local_d1: false, external_network_allowed: false, production_accessed: false};
 let runtime, hostDispatcher, restoreDispatcher;
 const directory = new URL('../web/drizzle/', import.meta.url);
-const files = ['0000_careful_shriek.sql', '0001_strong_swarm.sql', '0002_workspace_relations.sql',
-  '0003_github_app_connections.sql', '0004_jobs.sql', '0005_project_catalog.sql', '0006_qa_window.sql'];
+const files = (await readdir(directory)).filter(name=>/^\d{4}_.*\.sql$/.test(name)).sort();
 const original = {
   workbench_projects: 'id,owner_id,repo,repository_id,authorized_at',
   workbench_runs: '*', workbench_reviews: '*', workbench_github_sessions: '*', workbench_oauth_flows: '*',
@@ -88,7 +87,9 @@ try {
   summary.batch_rollback = (await db.prepare("SELECT count(*) AS n FROM workbench_projects WHERE id='rollback-project'").first()).n === 0;
   summary.foreign_key_check_clean = (await db.prepare('PRAGMA foreign_key_check').all()).results.length === 0;
   summary.user_table_count = (await db.prepare("SELECT count(*) AS n FROM sqlite_schema WHERE type='table' AND name LIKE 'workbench_%'").first()).n;
-  summary.all_migrations_applied = summary.user_table_count === 10;
+  summary.migration_files = files;
+  summary.all_migrations_applied = summary.user_table_count >= 11 && files.includes('0009_qa_compatibility_canary.sql');
+  summary.qa_canary_not_activated = (await db.prepare('SELECT count(*) AS n FROM workbench_qa_canary').first()).n === 0;
   summary.qa_not_activated = (await db.prepare('SELECT count(*) AS n FROM workbench_qa_window').first()).n === 0;
   const flags = Object.entries(summary).filter(([key, value]) => typeof value === 'boolean' && !['external_network_allowed', 'production_accessed'].includes(key));
   summary.passed = flags.every(([, value]) => value === true);

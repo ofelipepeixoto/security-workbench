@@ -10,8 +10,8 @@ import {createWorkbenchService} from '../lib/workbench-service.mjs';
 // Claims are anchored to SQL time; retain relative seven-day boundaries in CI.
 const START=Date.now(), SHA='a'.repeat(40);
 const A='171351708',B='322086368',ownerA='qa-primary',ownerB=`github:${B}`;
-const fixtures=[{githubId:A,installationId:11,repositoryId:21,repo:'ofelipepeixoto/qa-fixture-a'},
-  {githubId:B,installationId:12,repositoryId:22,repo:'radartech-news/qa-fixture-b'}];
+const fixtures=[{githubId:A,installationId:11,repositoryId:21,repo:'ofelipepeixoto/qa-fixture-a',revision:SHA},
+  {githubId:B,installationId:12,repositoryId:22,repo:'radartech-news/qa-fixture-b',revision:SHA}];
 function setup(t,{activate=true}={}) {
   const db=migratedDatabase();t.after(()=>db.close());let clock=START;
   const env={DB:db,WORKBENCH_QA_ENABLED:'true',WORKBENCH_OWNER_ID:ownerA,

@@ -19,6 +19,13 @@ declare namespace Cloudflare {
     GITHUB_APP_KEY_VERSION?: string;
     WORKBENCH_JOBS_ENABLED?: string;
     WORKBENCH_QA_ENABLED?: string;
+    WORKBENCH_QA_METRICS_ENABLED?: string;
+    WORKBENCH_CONTEXTUAL_ENABLED?: string;
+    WORKBENCH_CONTEXTUAL_DATA_POLICY?: string;
+    OPENAI_API_KEY?: string;
+    OPENAI_APPROVED_MODEL?: string;
+    OPENAI_PROJECT_ID?: string;
+    OPENAI_ORGANIZATION_ID?: string;
     ANALYSIS_QUEUE?: Queue<{ jobId: string }>;
     BUCKET?: R2Bucket;
   }

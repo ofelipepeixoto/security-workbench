@@ -3,10 +3,18 @@ on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      authorized_live_smokes:
+        description: 'Run real GitHub acquisition smokes only after separate scope approval'
+        type: boolean
+        required: true
+        default: false
 permissions:
   contents: read
 jobs:
   web-build:
+    if: github.event.repository.private == false
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:
@@ -28,6 +36,7 @@ jobs:
       - run: node node_modules/typescript/bin/tsc --noEmit --incremental false
       - run: node scripts/run-framework.mjs build
   test:
+    if: github.event.repository.private == false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -36,11 +45,13 @@ jobs:
           python-version: '3.12'
       - run: python -m unittest discover -s tests -v
   github-live:
-    # Credencial somente do próprio repositório; nenhum segredo de usuário.
+    # Real acquisition/analysis, not a synthetic test. Never run on a PR push.
+    # Keep the smoke intact; a separate authorization is needed to dispatch it.
     if: >-
-      github.event_name == 'pull_request' &&
-      github.repository == 'ofelipepeixoto/security-workbench' &&
-      github.event.pull_request.head.repo.full_name == github.repository
+      github.event_name == 'workflow_dispatch' &&
+      github.event.repository.private == false &&
+      inputs.authorized_live_smokes == true &&
+      github.repository == 'ofelipepeixoto/security-workbench'
     needs: test
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -53,16 +64,18 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
-      - name: Aquisição real privada pela CLI e HTTP local
+      - name: Aquisição real do repositório público pela CLI e HTTP local
         run: python -m scripts.smoke_github
         env:
           GITHUB_TOKEN: ${{ github.token }}
 
   web-scanner:
     if: >-
-      github.event_name == 'pull_request' &&
+      github.event.repository.private == false &&
       github.repository == 'ofelipepeixoto/security-workbench' &&
-      github.event.pull_request.head.repo.full_name == github.repository
+      ((github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event_name == 'workflow_dispatch' && inputs.authorized_live_smokes == true))
     needs: test
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -87,4 +100,5 @@ jobs:
           web/tests/github-owner-integration.test.mjs
           web/tests/workbench-access.test.mjs
       - name: Leitura real pública do REA autorizado
+        if: github.event_name == 'workflow_dispatch' && inputs.authorized_live_smokes == true
         run: node web/tests/live-smoke.mjs

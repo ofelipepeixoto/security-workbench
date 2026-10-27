@@ -45,12 +45,20 @@ def _finding(kind: str, path: str, line: int, detail: str, evidence: str, impact
 def _inspect_text(path: str, text: str) -> tuple[list[dict], list[dict]]:
     findings: list[dict] = []
     dependencies: list[dict] = []
+    occurrences: dict[tuple[str, str], int] = {}
+
+    def occurrence_detail(kind: str, detail: str) -> str:
+        key = (kind, detail)
+        count = occurrences.get(key, 0) + 1
+        occurrences[key] = count
+        return detail if count == 1 else f"{detail}\0occurrence:{count}"
+
     for number, line in enumerate(text.splitlines(), 1):
         match = ASSIGNMENT.search(line)
         if match and not PLACEHOLDER.match(match.group(2).strip()):
             key = match.group(1).lower()
             findings.append(_finding(
-                "possible-secret", path, number, key,
+                "possible-secret", path, number, occurrence_detail("possible-secret", key),
                 f"Atribuição a {key} com valor [REDACTED] em {path}:{number}.",
                 "Uma credencial real exposta pode permitir acesso indevido; a validade não foi verificada.",
                 "Revisar o valor fora do relatório; se for real, revogá-lo e removê-lo do histórico com procedimento controlado.",
@@ -58,7 +66,7 @@ def _inspect_text(path: str, text: str) -> tuple[list[dict], list[dict]]:
             ))
         if path.startswith(".github/workflows/") and re.search(r"^\s*permissions\s*:\s*write-all\s*(?:#.*)?$", line):
             findings.append(_finding(
-                "broad-workflow-permissions", path, number, "write-all",
+                "broad-workflow-permissions", path, number, occurrence_detail("broad-workflow-permissions", "write-all"),
                 f"Declaração permissions: write-all em {path}:{number}.",
                 "Um workflow comprometido pode obter permissões amplas, conforme seu gatilho e contexto.",
                 "Revisar o gatilho e conceder apenas permissões específicas necessárias.",

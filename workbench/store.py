@@ -113,6 +113,12 @@ def require_scope(db: sqlite3.Connection, repo: str) -> str:
 
 def save_run(db: sqlite3.Connection, repo: str, revision: str, result: dict, *, source: str = "local", verified_revision: bool = False) -> str:
     repo = require_scope(db, repo)
+    # Old/native adapters may still supply repeated finding identities. Reject
+    # the whole input before writes instead of silently dropping occurrences
+    # through findings' primary key and INSERT OR IGNORE.
+    identities = [item["fingerprint"] for item in result["findings"]]
+    if len(set(identities)) != len(identities):
+        raise ValueError("Identidades de revisão repetidas; a análise não foi gravada.")
     if source not in {"local", "github", "rea-import"} or (verified_revision and source != "github"):
         raise ValueError("Origem ou verificação inválida.")
     repository_id = None

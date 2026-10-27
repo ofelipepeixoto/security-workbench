@@ -2,6 +2,18 @@
 
 Plataforma experimental em construção para inspecionar ativos **autorizados**. O núcleo local analisa cópias ou lê arquivos de um commit específico pelo GitHub, sem executar código do alvo. Os resultados ficam em SQLite local.
 
+## Estado atual — 27/10/2026 UTC
+
+[English overview](README.en.md). O código evolui na cadeia de PRs em rascunho #43 → #44 → #45 → #46 → #47; a `main` não representa automaticamente o ambiente hospedado. Produção pública v15 e QA isolado têm aprovações e configurações próprias.
+
+O QA permanece no commit `8ac53f9ad5a0ded0ea50242797f902d0756c0c42` da PR #47, inativo e sem migrations adicionais. A/B passaram individualmente por login/App/catálogo; os perfis foram preparados e confirmados pelo titular. Isso não conclui isolamento por IDs ou negativos hospedados. Esta branch acrescenta uma checagem manual protegida para essas negativas, implementada/testada localmente e **ainda não implantada**. O canário Q2 não foi iniciado. Capacidade de coletar CPU é preflight; medição real ocorre durante o canário. Privacidade integral da captura nativa e mobile continuam pendentes. Veja a matriz e o contrato de QA para distinguir código, CI, ambiente e homologação.
+
+Login validado, conexão da App, metadados descobertos e autorização para analisar são capacidades separadas. O catálogo informa a interseção usuário × instalação, inclusive itens nunca cadastrados como projeto, sem prometer acesso global a privados/organizações. Seleção de metadados não resolve commit nem cria análise.
+
+As detecções exigem avaliação humana; o orientador por regras e o prompt portátil não são IA generativa. A integração contextual está preparada, desligada, sem chamadas reais de modelo. Patches são propostas, não alterações aplicadas automaticamente. O piloto não está homologado e nenhum período de sete dias foi concluído.
+
+Veja a [matriz atual](docs/reconciliacao-entregas-2026-10-26.md), [auditoria cumulativa Q1 e limites](docs/auditoria-cumulativa-q1-2026-10-26.md) e [arquitetura/ameaças](docs/adr-mvp-v2.md). Evidências operacionais, contas, dumps e backups ficam fora do repositório. As seções datadas abaixo conservam registros históricos e não substituem essa reconciliação.
+
 ## Site e demonstração online
 
 Atualização de 21/10: **Site v15 publicado**, importação REA existente conferida e aquisição GitHub hospedada bloqueada pela cota pública do servidor. O REA local não precisa ser reinstalado ou repetido. Consulte a [homologação atual](docs/homologacao-2026-10-21.md) e as [pendências](docs/pendencias-2026-10-21.md); os registros de versões anteriores abaixo permanecem históricos.
@@ -10,7 +22,7 @@ Atualização de 21/10: **Site v15 publicado**, importação REA existente confe
 
 O **Site v13**, publicado em 21/10/2026 às 21:09 UTC, exige exclusivamente GitHub na operação real. O segredo e a associação ao proprietário estão configurados no servidor, com login habilitado na revisão de ambiente 6. O proprietário confirmou entrada e histórico na v12; revisão persistida, comparação e download autenticados ainda precisam completar a homologação. A v13 exige novo login por atualizar a associação das sessões. Consulte o [estado e as pendências observadas](docs/pendencias-2026-10-21.md) e o [guia de acesso](docs/autenticacao-github.md).
 
-Somente repositórios **públicos** de `ofelipepeixoto` podem ser cadastrados após confirmação de escopo. Entrar pelo GitHub não importa automaticamente seus repositórios: Projetos mostra os cadastros autorizados no Workbench. A aquisição fixa o commit, confere identidade e hashes e lê até 20 arquivos suportados; lacunas aparecem como cobertura parcial. A leitura pública da API GitHub está sujeita à cota compartilhada por IP. A v13 também permite importar Evidence REA limitado, com proveniência declarada e revisão humana; **não executa o motor REA**. Não há auditoria completa de CVEs nem execução de código do alvo.
+**Histórico do fluxo v13:** somente repositórios **públicos** de `ofelipepeixoto` podiam ser cadastrados após confirmação de escopo. Entrar pelo GitHub não importa automaticamente seus repositórios: Projetos mostra os cadastros autorizados no Workbench. A aquisição fixa o commit, confere identidade e hashes e lê até 20 arquivos suportados; lacunas aparecem como cobertura parcial. A leitura pública da API GitHub está sujeita à cota compartilhada por IP. A v13 também permite importar Evidence REA limitado, com proveniência declarada e revisão humana; **não executa o motor REA**. Não há auditoria completa de CVEs nem execução de código do alvo.
 
 O Site público é distinto desta interface Python local e do banco SQLite: a área hospedada usa D1 isolado. [Estado da publicação e verificações](docs/sistema-web-privado.md). A visibilidade do repositório e a audiência do Site são independentes. Não inserir segredos ou dados sensíveis na demonstração.
 

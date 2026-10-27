@@ -7,6 +7,7 @@ import {GitHubAppError} from '../lib/github-app-client.mjs';
 import {resolveWorkspacePrincipal} from '../lib/github-auth.mjs';
 import {createAnalysisJobs, recoverAnalysisJobs, AnalysisJobError} from '../lib/analysis-jobs.mjs';
 import {inspectGitHubApp} from '../lib/scanner.mjs';
+import {createQaMetrics} from '../lib/qa-metrics.mjs';
 import {createQaGuard,qaFetchBudget} from '../lib/qa-guard.mjs';
 
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -19,21 +20,25 @@ function appConfig(env) {
     appId:env.GITHUB_APP_ID,slug:env.GITHUB_APP_SLUG,clientId:env.GITHUB_APP_CLIENT_ID,clientSecret:env.GITHUB_APP_CLIENT_SECRET,
     encryptionKey:env.GITHUB_APP_TOKEN_KEY,keyVersion:env.GITHUB_APP_KEY_VERSION||'1'};
 }
-export function createAnalysisConsumer({env,fetcher=fetch,now=()=>new Date(),appAuthFactory=createGitHubAppAuth,observe}={}) {
+export function createAnalysisConsumer({env,fetcher=fetch,now=()=>new Date(),appAuthFactory=createGitHubAppAuth,observe,metricsSink}={}) {
   const qaGuard=createQaGuard({env,now});
   const active=()=>env?.WORKBENCH_JOBS_ENABLED==='true'&&env.WORKBENCH_MULTIUSER_ENABLED==='true'&&env.GITHUB_APP_ENABLED==='true'&&env.DB?.batch;
-  async function process(jobId) {
+  async function process(jobId,{transportAttempt}={}) {
     if (!active()) throw new AnalysisJobError('worker_unavailable');
     if(typeof jobId!=='string'||!UUID.test(jobId)) throw new AnalysisJobError('invalid_request',400);
-    const row=await env.DB.prepare('SELECT * FROM workbench_analysis_jobs WHERE id=?').bind(jobId).first();
-    if(!row) return null;
+    const metrics=await createQaMetrics({env,jobId,transportAttempt,...(metricsSink?{emit:metricsSink}:{})}),db=metrics?.wrapDb(env.DB)??env.DB;
+    const qaGuard=createQaGuard({env,db,now});
+    let metricOutcome='error',metricCode;
+    try {
+    const row=await db.prepare('SELECT * FROM workbench_analysis_jobs WHERE id=?').bind(jobId).first();
+    if(!row){metricOutcome='not_found';return null;}
     const window=qaGuard?await qaGuard.checkJob(row):null;
     const principal=resolveWorkspacePrincipal(policy(env),row.github_id);
     let phase='authorization_initial',assertRunning;
-    const emit=event=>{if(event.phase)phase=event.phase;try{observe?.({...event,phase});}catch{/* diagnostic callbacks cannot affect work */}};
+    const emit=event=>{if(event.phase)phase=event.phase;metrics?.observe(event);try{observe?.({...event,phase});}catch{/* diagnostic callbacks cannot affect work */}};
     const guardedTransport=async(input,init)=>{await assertRunning?.();return fetcher(input,init);};
     const transport=window?qaFetchBudget(fetcher,{now,endsAt:window.ends_at,observe:emit,beforeRequest:()=>assertRunning?.()}):guardedTransport;
-    const app=appAuthFactory({config:appConfig(env),db:env.DB,fetcher:transport,now});
+    const app=appAuthFactory({config:appConfig(env),db,fetcher:transport,now});
     if(!app.enabled) throw new AnalysisJobError('worker_unavailable');
     const user=principal?{...principal,provider:'github'}:null;
     const allowed=principal?.userId===row.owner_id;
@@ -61,7 +66,7 @@ export function createAnalysisConsumer({env,fetcher=fetch,now=()=>new Date(),app
       return access.repository.id===job.repository_id&&access.repository.full_name===job.repo&&access.revision===job.revision&&
         access.repository.private===initialRepository.private&&access.repository.visibility===initialRepository.visibility;
     };
-    return createAnalysisJobs({db:env.DB,ownerId:row.owner_id,githubId:row.github_id,now,authorize,qaGuard,observe:emit,
+    const outcome=await createAnalysisJobs({db,ownerId:row.owner_id,githubId:row.github_id,now,authorize,qaGuard,observe:emit,
       ...(typeof app.createExecutionContext==='function'?{persistenceProof:()=>execution?.persistenceProof()}:{}),
       ...(window?{timeoutMs:Math.max(1,Math.min(45000,window.ends_at-new Date(now()).valueOf()))}:{}),
       analyze:async(job,{signal,assertActive})=>{
@@ -77,6 +82,8 @@ export function createAnalysisConsumer({env,fetcher=fetch,now=()=>new Date(),app
         });
       },
     }).process(jobId);
+    metricOutcome=outcome?.job?.status??'not_found';metricCode=outcome?.job?.failure_code;return outcome;
+    }catch(error){metricCode=error?.code;throw error;}finally{metrics?.finish(metricOutcome,metricCode);}
   }
   async function recover() {
     if(!active()||typeof env.ANALYSIS_QUEUE?.send!=='function') throw new AnalysisJobError('worker_unavailable');
@@ -97,7 +104,7 @@ const worker = {
     const consumer=createAnalysisConsumer({env});
     for(const message of batch.messages) {
       if(!message.body||typeof message.body.jobId!=='string'||!UUID.test(message.body.jobId)||Object.keys(message.body).join(',')!=='jobId') {message.ack();continue;}
-      try {await consumer.process(message.body.jobId);message.ack();}
+      try {await consumer.process(message.body.jobId,{transportAttempt:message.attempts});message.ack();}
       catch(error) {
         if(['qa_closed','qa_scope','qa_consumption'].includes(error.code))message.ack();
         else message.retry({delaySeconds:60});

@@ -2,10 +2,11 @@
 // Full document navigation avoids the observed vinext production routing regression and reloads the server authorization gate.
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Activity, ArrowLeft, ArrowRight, Check, CheckCircle2, ChevronRight, Download, FileCode2, FileText, FolderGit2, GitBranch, LayoutDashboard, LockKeyhole, Plus, RefreshCw, Search, Settings2, Shield, SlidersHorizontal, X, AlertCircle, Menu, User, CircleHelp, ListChecks } from "lucide-react";
-import { GitHubCatalogController, catalogFailureScope, type CatalogCall } from "../components/github-catalog-controller";
+import { GitHubCatalogController, catalogFailureScope, isExpectedQaClosedCheckError, type CatalogCall } from "../components/github-catalog-controller";
 import { GitHubSessionStatus, type GitHubSessionSnapshot } from "../components/github-session-status";
 import { OperationalInfo } from "../components/operational-info";
 import { AutomaticGuidance, type AutomaticGuidanceData } from "../components/automatic-guidance";
+import { ContextualReview, ContextualReviewController, type ContextualReviewEnvelope } from "../components/contextual-review";
 import { buildReviewGuidance, renderReviewGuidanceMarkdown } from "../lib/review-advisor.mjs";
 import { newReaImportAttemptTracker } from "../lib/rea-import-attempt.mjs";
 import { renderCorrectionPrompt } from "../lib/correction-prompt.mjs";
@@ -31,13 +32,14 @@ const emptyRuns: Run[] = [];
 const anonymousSession: GitHubSessionSnapshot = { state: "anonymous" };
 const emptyFilters: Filters = { q: "", project: "", status: "", kind: "", from: "", to: "", before: "", after: "", run: "" };
 
-class ApiError extends Error { constructor(message: string, public status: number, public code?: string, public retryAt?: string) { super(message); } }
+class ApiError extends Error { constructor(message: string, public status: number, public code?: string, public retryAt?: string, public qaCheck?: unknown) { super(message); } }
 async function api<T>(payload?: object, csrfToken = "", signal?: AbortSignal, endpoint = "/api/workbench"): Promise<T> {
   const response = await fetch(endpoint, payload ? { method: "POST", headers: { "Content-Type": "application/json", ...(csrfToken ? { "X-Workbench-CSRF": csrfToken } : {}) }, body: JSON.stringify(payload), cache: "no-store", signal } : { cache: "no-store", signal });
-  let result: T & { error?: string; code?: string; retry_at?: string };
-  try { result = await response.json() as T & { error?: string; code?: string; retry_at?: string }; }
+  let result: T & { error?: string; code?: string; retry_at?: string; qa_check?: unknown };
+  try { result = await response.json() as T & { error?: string; code?: string; retry_at?: string; qa_check?: unknown }; }
   catch { throw new ApiError("O servidor não retornou uma resposta válida. Confira o histórico antes de tentar novamente.", response.status); }
-  if (!response.ok) throw new ApiError(catalogFailureScope(response.status, result.code) === "login_session" ? "Sua sessão expirou ou não está disponível. Entre novamente pelo GitHub para continuar." : result.error || "Não foi possível concluir. Confira o histórico antes de tentar novamente.", response.status, result.code, result.retry_at);
+  if ((payload as {qaClosedCheck?:boolean}|undefined)?.qaClosedCheck===true && response.ok) throw new ApiError("Resposta de sucesso inesperada na checagem do QA. Interrompa e confira os contadores.",response.status,result.code,result.retry_at,result.qa_check);
+  if (!response.ok) throw new ApiError(catalogFailureScope(response.status, result.code) === "login_session" ? "Sua sessão expirou ou não está disponível. Entre novamente pelo GitHub para continuar." : result.error || "Não foi possível concluir. Confira o histórico antes de tentar novamente.", response.status, result.code, result.retry_at, result.qa_check);
   return result;
 }
 function date(value: string) {
@@ -213,10 +215,21 @@ export default function Workbench({ signedIn, name, initialSession = anonymousSe
   const handleSessionLost = useCallback(() => handleFailure(new ApiError("Sua sessão GitHub não está confirmada. Entre novamente ou recarregue com a conta atual antes de consultar dados reais.", 401)), [handleFailure]);
   const catalogCall: CatalogCall = useCallback(async <T,>(payload: object, signal?: AbortSignal, endpoint = "/api/workbench"): Promise<T> => {
     const request = accessRequests.begin(signal);
-    return callWorkbenchCatalog(request, catalogRecovery, current => api<T>(payload, csrfToken, current.signal, endpoint), handleFailure, result => {
+    return callWorkbenchCatalog(request, catalogRecovery, current => api<T>(payload, csrfToken, current.signal, endpoint), cause=>{if(!isExpectedQaClosedCheckError(payload,cause))handleFailure(cause);}, result => {
       if (endpoint === "/api/auth/github-app/disconnect" && (result as { ok?: boolean }).ok) handleFailure(new ApiError("A conexão da GitHub App foi removida. O login permanece separado; revalide o acesso aos repositórios.", 401, "disconnected"));
     });
   }, [accessRequests, catalogRecovery, csrfToken, handleFailure]);
+  const captureContextualAccess = useCallback(() => accessRequests.capture(), [accessRequests]);
+  const contextualTransport = useCallback(async ({method,signal}:{method:"GET"|"POST";signal:AbortSignal}):Promise<ContextualReviewEnvelope> => {
+    if (!selected?.id || demo) throw new DOMException("Contexto indisponível.", "AbortError");
+    const request = accessRequests.begin(signal);
+    try {
+      request.assertCurrent();
+      const endpoint = "/api/workbench/contextual-review" + (method === "GET" ? "?runId=" + encodeURIComponent(selected.id) : "");
+      const result = await api<ContextualReviewEnvelope>(method === "POST" ? {runId:selected.id} : undefined, csrfToken, request.signal, endpoint);
+      request.assertCurrent(); return result;
+    } finally { request.finish(); }
+  }, [accessRequests,csrfToken,demo,selected?.id]);
   // The parent must open before the catalog's passive effects capture tickets.
   // Layout cleanup/reopening also preserves StrictMode's setup/cleanup replay.
   useLayoutEffect(() => { accessRequests.open(); return () => accessRequests.close(); }, [accessRequests]);
@@ -413,6 +426,7 @@ export default function Workbench({ signedIn, name, initialSession = anonymousSe
           <RunOutcome run={selected} demo={demo} busy={busy || sessionLost} compareHref={href("/compare", { after: selected.id, before: completed.find(run => run.id !== selected.id && run.project_id === selected.project_id && (run.source || "github-public") === (selected.source || "github-public"))?.id || "" })} refreshHref={href("/runs/" + encodeURIComponent(selected.id))} onExport={() => void exportReport(selected)} />
           <RunMetadata run={selected} demo={demo} />
           {selected.status === "complete" && <AutomaticGuidance guidance={selectedGuidance} />}
+          {selected.status === "complete" && (demo ? <ContextualReview review={{schema:"security-workbench.contextual-review/v1",method:"model-contextual",state:"disabled",revision:selected.revision}} /> : <ContextualReviewController runId={selected.id} revision={selected.revision} transport={contextualTransport} sessionUnavailable={sessionLost} captureAccess={captureContextualAccess} onUnauthorized={handleFailure} />)}
           {selected.status === "complete" && <><section id="analysis-review" aria-labelledby="analysis-review-title"><div className="section-heading review-section-heading"><div><h2 id="analysis-review-title">Candidatos para revisão <span className="badge">{selected.findings?.length ?? "Não informado"}</span></h2><p>Confira evidência, impacto possível e recomendação antes de registrar sua decisão. Confiança não é severidade.</p></div></div>{selected.findings?.length ? selected.findings.map((finding, index) => <FindingCard key={finding.fingerprint + finding.status} finding={finding} index={index} guidance={selectedGuidance} busy={busy || sessionLost} save={(item, decision) => void review(item, decision)} />) : <section className="panel"><Empty title={!selected.findings ? "Candidatos não disponíveis neste registro" : selected.source === "rea-import" ? "Nenhum candidato importado para revisão" : "Nenhum candidato nos arquivos lidos"}><p>Confira a cobertura e as omissões abaixo. Isso não comprova ausência de vulnerabilidades.</p><a className="text-button" href="#analysis-coverage">Conferir cobertura<ArrowRight size={16} /></a></Empty></section>}</section><RunCoverage run={selected} demo={demo} /><RunEvidenceDetails run={selected} /></>}
         </>}</>}
 

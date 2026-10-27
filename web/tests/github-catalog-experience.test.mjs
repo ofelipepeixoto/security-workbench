@@ -12,7 +12,7 @@ import ts from 'typescript';
 // or browser/effect tests. No provider, credentials, network, or new dependency.
 const webRoot = fileURLToPath(new URL('../', import.meta.url));
 const output = await mkdtemp(join(webRoot, '.catalog-experience-'));
-let GitHubCatalog, createCatalogRequestScope, emptyCatalogPage, validateCatalogPage, mergeCatalogPage, failedCatalogPage, catalogFailureScope;
+let GitHubCatalog, createCatalogMetadataSelection, createCatalogRequestScope, emptyCatalogPage, validateCatalogPage, mergeCatalogPage, failedCatalogPage, catalogFailureScope, createQaClosedCheckAttempt, isExpectedQaClosedCheckError, QaClosedCheck;
 try {
   for (const file of ['components/github-catalog.tsx', 'components/github-catalog-controller.tsx']) {
     const result = ts.transpileModule(await readFile(join(webRoot, file), 'utf8'), {
@@ -29,7 +29,7 @@ try {
     await writeFile(target, result.outputText);
   }
   ({ GitHubCatalog } = await import(pathToFileURL(join(output, 'components/github-catalog.mjs')).href));
-  ({ createCatalogRequestScope, emptyCatalogPage, validateCatalogPage, mergeCatalogPage, failedCatalogPage, catalogFailureScope } = await import(pathToFileURL(join(output, 'components/github-catalog-controller.mjs')).href));
+  ({ createCatalogMetadataSelection, createCatalogRequestScope, emptyCatalogPage, validateCatalogPage, mergeCatalogPage, failedCatalogPage, catalogFailureScope, createQaClosedCheckAttempt, isExpectedQaClosedCheckError, QaClosedCheck } = await import(pathToFileURL(join(output, 'components/github-catalog-controller.mjs')).href));
 } finally {
   await rm(output, { recursive: true, force: true });
 }
@@ -54,6 +54,83 @@ function model(changes = {}) {
   };
 }
 const renderCatalog = (value, embedded = false) => renderToStaticMarkup(React.createElement(GitHubCatalog, { model: value, actions, embedded }));
+
+test('real installation and repository coverage contracts are validated separately', () => {
+  const installationResponse = { ...pageResponse(1, null, 1), page_limit: 10, limit_reached: false,
+    total_scope: 'user_app_installations', coverage: { scope: 'user_app_installations', global_complete: false } };
+  assert.doesNotThrow(() => validateCatalogPage([installation(11, 'synthetic-account-a')], installationResponse, 1, 'installations'));
+  assert.throws(() => validateCatalogPage([repository(1)], installationResponse, 1, 'repositories'), /página do catálogo/);
+  const repositoryResponse = { ...pageResponse(1, null, 1), page_limit: 10, limit_reached: false,
+    coverage: { scope: 'installation_user_intersection', repository_selection: 'selected', global_complete: false, contents_permission: false } };
+  assert.doesNotThrow(() => validateCatalogPage([repository(1)], repositoryResponse, 1, 'repositories'));
+  assert.throws(() => validateCatalogPage([installation(11, 'synthetic-account-a')], repositoryResponse, 1, 'installations'), /página do catálogo/);
+  for (const patch of [{ global_complete: true }, { scope: 'all_user_repositories' }, { repository_selection: 'invented' }]) {
+    assert.throws(() => validateCatalogPage([repository(1)], { ...repositoryResponse, coverage: { ...repositoryResponse.coverage, ...patch } }, 1, 'repositories'), /página do catálogo/);
+  }
+});
+
+test('metadata discovery without code permission stays visible with a protected authorization path', () => {
+  const item = { ...repository(7), fork: true, archived: true, visibility: 'internal', analysis_access: { state: 'contents_permission_required', can_analyze: false, manage_url: 'https://github.com/settings/installations/11' } };
+  const repositories = mergeCatalogPage(emptyCatalogPage(), [item], { ...pageResponse(1, null, 1), coverage: { scope: 'installation_user_intersection', repository_selection: 'selected', global_complete: false, contents_permission: false } });
+  const html = renderCatalog(model({ repositories }));
+  assert.match(html, /synthetic-account-a\/fixture-7/);
+  assert.match(html, /Interno · Fork/);
+  assert.match(html, /Arquivado/);
+  assert.match(html, /leitura do código ainda não autorizada à App/);
+  assert.match(html, /<button class="button secondary">Escolher repositório/);
+  assert.doesNotMatch(html, /<button[^>]*disabled[^>]*>Escolher repositório/);
+  assert.match(html, /href="https:\/\/github.com\/settings\/installations\/11"/);
+  assert.match(html, /Conferir autorização no GitHub/);
+  assert.match(html, /Cobertura parcial da conta GitHub/);
+  assert.match(html, /somente repositórios selecionados/);
+  assert.doesNotMatch(html, /Preparar análise de|Solicitar análise limitada/);
+});
+
+test('all selection explains future repositories without claiming global user coverage or consent', () => {
+  const repositories = mergeCatalogPage(emptyCatalogPage(), [repository(1)], { ...pageResponse(1, null, 1), coverage: { scope: 'installation_user_intersection', repository_selection: 'all', global_complete: false, contents_permission: true } });
+  const html = renderCatalog(model({ repositories }));
+  assert.match(html, /repositórios atuais e futuros dessa conta ou organização/);
+  assert.match(html, /Outras instalações, organizações, colaborações ou exigências de SSO podem continuar fora/);
+  assert.match(html, /Negar ou cancelar esse consentimento mantém a cobertura atual/);
+  assert.match(html, /1 informados pelo GitHub nesta interseção/);
+  assert.match(html, /não é um total global da conta GitHub/);
+  assert.doesNotMatch(html, /Todos os repositórios da conta carregados|Acesso a futuros repositórios autorizado automaticamente/);
+});
+
+test('page caps remain partial and cannot make the next cursor actionable', () => {
+  const response = { ...pageResponse(10, 11, 1100), page_limit: 10, limit_reached: true };
+  validateCatalogPage([repository(1000)], response, 10, 'repositories');
+  const repositories = mergeCatalogPage(emptyCatalogPage(), [repository(1000)], response);
+  const html = renderCatalog(model({ repositories }));
+  assert.match(html, /Limite desta consulta atingido/);
+  assert.match(html, /Até 10 páginas são permitidas por instalação/);
+  assert.match(html, /1100 informados pelo GitHub nesta interseção/);
+  assert.match(html, /<button class="button secondary" disabled="">Carregar próxima página/);
+  assert.match(html, /Sincronização incompleta/);
+  assert.throws(() => validateCatalogPage([repository(1000)], { ...response, limit_reached: false }, 10, 'repositories'), /página do catálogo/);
+});
+
+test('internal visibility filters do not merge private and internal repositories', () => {
+  const items = [repository(1), { ...repository(2), visibility: 'internal', archived: true, fork: true }, { ...repository(3), private: false, visibility: 'public' }];
+  const value = model({ repositories: mergeCatalogPage(emptyCatalogPage(), items, pageResponse(1, null, 3)), filters: { q: '', visibility: 'internal', archived: '', language: '' } });
+  const html = renderCatalog(value);
+  assert.match(html, /1 de 3 repositórios carregados/);
+  assert.match(html, /synthetic-account-a\/fixture-2/);
+  assert.doesNotMatch(html, /synthetic-account-a\/fixture-[13]/);
+});
+
+test('metadata discovery never expands the QA fixture policy or suggests GitHub consent can bypass it', () => {
+  const item = { ...repository(7), analysis_access: { state: 'available', can_analyze: true, qa_allowed: false, qa_reason: 'not_selected_fixture', manage_url: 'https://github.com/settings/installations/11' } };
+  const value = model({ repositories: mergeCatalogPage(emptyCatalogPage(), [item], pageResponse(1, null, 1)) });
+  value.status.analysis_policy = 'qa_selected_fixtures';
+  const html = renderCatalog(value);
+  assert.match(html, /somente fixtures previamente selecionadas podem ser analisadas/);
+  assert.match(html, /análise bloqueada pela seleção exclusiva de fixtures do QA/);
+  assert.match(html, /<button class="button secondary">Escolher repositório/);
+  assert.doesNotMatch(html, /<button[^>]*disabled[^>]*>Escolher repositório/);
+  assert.doesNotMatch(html, /Conferir autorização no GitHub/);
+});
+
 function deferred() {
   let resolve, reject;
   const promise = new Promise((resolvePromise, rejectPromise) => { resolve = resolvePromise; reject = rejectPromise; });
@@ -306,4 +383,79 @@ test('the embedded confirmation explains the move to job tracking before submiss
   assert.ok(explanation >= 0 && explanation < submit);
   assert.match(html, /resultado ficará disponível quando o processamento terminar/);
   assert.doesNotMatch(renderCatalog(value), /Ao solicitar, você abrirá o acompanhamento/);
+});
+
+
+test('zero filtered results offers a local reset without mistaking hidden authorized items for no access', () => {
+  const value = model({ filters: { q: 'missing-fixture', visibility: '', archived: '', language: '' } });
+  const html = renderCatalog(value, true);
+  assert.match(html, /Nenhum repositório corresponde aos filtros/);
+  assert.match(html, /Limpar filtros desta instalação/);
+  assert.doesNotMatch(html, /Nenhum repositório autorizado retornado|Escolher repositório/);
+  const empty = renderCatalog(model({ repositories: mergeCatalogPage(emptyCatalogPage(), [], pageResponse(1, null, 0)) }), true);
+  assert.match(empty, /Nenhum repositório autorizado retornado/);
+  assert.doesNotMatch(empty, /Limpar filtros desta instalação/);
+});
+
+
+test('authorized metadata can be selected while QA processing or Contents access stays blocked', () => {
+  for (const analysis_access of [
+    { state: 'available', can_analyze: true, qa_allowed: false, qa_reason: 'window_not_open' },
+    { state: 'contents_permission_required', can_analyze: false, manage_url: 'https://github.com/settings/installations/11' },
+  ]) {
+    const item = { ...repository(9), analysis_access };
+    const repositories = mergeCatalogPage(emptyCatalogPage(), [item], pageResponse(1, null, 1));
+    const selected = createCatalogMetadataSelection(item, repositories, 11);
+    assert.deepEqual(selected, { repository: item, revisionInput: '', confirmed: false, prepared: null });
+    const html = renderCatalog(model({ repositories, selection: selected }), true);
+    assert.match(html, /Repositório selecionado: synthetic-account-a\/fixture-9/);
+    assert.match(html, /conserva somente os metadados já autorizados/);
+    assert.match(html, /Preparar commit e solicitar análise continuam bloqueados/);
+    assert.doesNotMatch(html, /<form|Preparar análise e fixar commit|Solicitar análise limitada|Commit fixado/);
+    if (analysis_access.qa_allowed === false) assert.doesNotMatch(html, /Conferir autorização no GitHub/);
+    else assert.match(html, /Conferir autorização no GitHub/);
+  }
+});
+
+test('metadata selection accepts only a current successful page and its exact repository identity', () => {
+  const item = repository(9), repositories = mergeCatalogPage(emptyCatalogPage(), [item], pageResponse(1, null, 1));
+  assert.equal(createCatalogMetadataSelection(item, failedCatalogPage(repositories), 11), null);
+  assert.equal(createCatalogMetadataSelection(item, { ...repositories, state: 'loading' }, 11), null);
+  assert.equal(createCatalogMetadataSelection(item, repositories, 22), null);
+  assert.equal(createCatalogMetadataSelection({ ...item, id: 10 }, repositories, 11), null);
+  assert.equal(createCatalogMetadataSelection({ ...item, full_name: 'synthetic-account-b/fixture-9' }, repositories, 11), null);
+  const html = renderCatalog(model({ repositories, selection: createCatalogMetadataSelection(item, repositories, 11), status: { enabled: true, connection: { state: 'revoked' }, jobs_enabled: false, limits } }), true);
+  assert.doesNotMatch(html, /synthetic-account-a\/fixture-9|Preparar análise de|Repositório selecionado:/);
+  assert.match(html, /acesso aos repositórios foi revogado/);
+});
+
+// Manual closed-QA protocol; fake HTTP responses, not a hosted negative test.
+const checkProof=(action='qa-closed-check')=>({action,source_revision:'d'.repeat(40),checked_at:'2026-10-26T12:00:00Z',fixture:{repositoryId:21,installationId:11}});
+function checkError(action,patch={}){return Object.assign(new Error(action==='enqueue-job'?'A execução por jobs não está ativada neste ambiente.':'QA fechado'),{status:action==='enqueue-job'?503:403,...(action==='catalog-authorize'?{code:'qa_closed'}:{}),qaCheck:checkProof(action),...patch});}
+test('closed QA UI has an explicit keyboard button and SSR never initiates the protocol',()=>{
+ let calls=0;const html=renderToStaticMarkup(React.createElement(QaClosedCheck,{call:()=>{calls++;}}));
+ assert.equal(calls,0);assert.match(html,/<button[^>]*>Executar duas negativas do QA fechado<\/button>/);assert.match(html,/Aguardando ação explícita/);assert.match(html,/Sem polling ou retentativa/);
+});
+test('manual protocol uses the same client exactly once per step, no arbitrary fields, and keeps expected errors rejected',async()=>{
+ const calls=[],receipts=[],attempt=createQaClosedCheckAttempt(),signal=new AbortController().signal;
+ const call=async payload=>{calls.push(payload);if(payload.action==='qa-closed-check')return {check:{...checkProof(),fixture:{...checkProof().fixture,url:'https://untrusted.invalid',action:'delete-project',projectId:'fabricated'}}};throw checkError(payload.action);};
+ const result=await attempt.run(call,signal,()=>true,r=>receipts.push(r));
+ assert.deepEqual(calls.map(p=>p.action),['qa-closed-check','catalog-authorize','enqueue-job']);assert.equal(receipts.length,2);assert.equal(result[1].code,null);
+ assert.deepEqual(Object.keys(calls[1]).sort(),['action','installationId','qaClosedCheck','repositoryId']);
+ await assert.rejects(attempt.run(call,signal,()=>true),/já foi solicitada/);assert.equal(calls.length,3);
+ const expected=checkError('catalog-authorize');assert.equal(isExpectedQaClosedCheckError(calls[1],expected),true);
+ for(const patch of [{qaCheck:undefined},{status:401},{code:undefined},{qaCheck:checkProof('other')},{qaCheck:{...checkProof('catalog-authorize'),fixture:{repositoryId:22,installationId:12}}}])assert.equal(isExpectedQaClosedCheckError(calls[1],checkError('catalog-authorize',patch)),false);
+ assert.equal(isExpectedQaClosedCheckError({action:'catalog-authorize'},expected),false);
+});
+test('expired/CSRF/unexpected/success responses stop before the second negative and never retry',async()=>{
+ for(const failure of [checkError('catalog-authorize',{status:401}),checkError('catalog-authorize',{code:undefined}),checkError('catalog-authorize',{qaCheck:undefined}),checkError('catalog-authorize',{qaCheck:{...checkProof('catalog-authorize'),source_revision:'e'.repeat(40)}}),null]){
+  const calls=[];const call=async p=>{calls.push(p.action);if(p.action==='qa-closed-check')return {check:checkProof()};if(failure)throw failure;return {unexpected:'success'};};
+  await assert.rejects(createQaClosedCheckAttempt().run(call,new AbortController().signal,()=>true),/Resposta inesperada/);assert.deepEqual(calls,['qa-closed-check','catalog-authorize']);
+ }
+ const calls=[];await assert.rejects(createQaClosedCheckAttempt().run(async p=>{calls.push(p);throw Error('QA aberto ou desconhecido');},new AbortController().signal,()=>true));assert.equal(calls.length,1);
+});
+test('session switch during a delayed negative invalidates receipts and stops the remaining request',async()=>{
+ let current=true,release;const pending=new Promise(r=>{release=r;}),calls=[],receipts=[];
+ const work=createQaClosedCheckAttempt().run(async p=>{calls.push(p.action);if(p.action==='qa-closed-check')return {check:checkProof()};await pending;throw checkError(p.action);},new AbortController().signal,()=>current,r=>receipts.push(r));
+ await Promise.resolve();await Promise.resolve();current=false;release();await assert.rejects(work,e=>e.name==='AbortError');assert.equal(receipts.length,0);assert.deepEqual(calls,['qa-closed-check','catalog-authorize']);
 });

@@ -41,11 +41,12 @@ export async function qaConsumerFixture(t,options={}) {
     revoked:false,suspended:false,contents:'read',pull:true,private:true,renamed:false,shaChanged:false,wrongIdentity:false};
   const env={DB:db,WORKBENCH_QA_ENABLED:'true',WORKBENCH_JOBS_ENABLED:'true',WORKBENCH_MULTIUSER_ENABLED:'true',
     GITHUB_APP_ENABLED:'true',GITHUB_OWNER_ID:ACTORS.A.githubId,WORKBENCH_OWNER_ID:ACTORS.A.ownerId,
-    WORKBENCH_PILOT_GITHUB_IDS:ACTORS.B.githubId,WORKBENCH_ORIGIN:'https://synthetic.invalid',
+    WORKBENCH_PILOT_GITHUB_IDS:ACTORS.B.githubId,WORKBENCH_ORIGIN:options.origin??'https://synthetic.invalid',
     GITHUB_APP_ID:'123',GITHUB_APP_SLUG:'synthetic-app',GITHUB_APP_CLIENT_ID:'synthetic-client',
-    GITHUB_APP_CLIENT_SECRET:'SYNTHETIC_ONLY_NEVER_VALID',GITHUB_APP_TOKEN_KEY:base64(crypto.getRandomValues(new Uint8Array(32))),GITHUB_APP_KEY_VERSION:'1'};
-  const now=()=>new Date(clock),fixtures=Object.values(ACTORS).map(a=>({...a,repo:`${a.namespace}/synthetic-fixture` }));
-  db.sql.prepare('INSERT INTO workbench_qa_window VALUES (1,?,?,?,NULL)').run(START,START+604800000,JSON.stringify(fixtures));
+    GITHUB_APP_CLIENT_SECRET:'SYNTHETIC_ONLY_NEVER_VALID',GITHUB_APP_TOKEN_KEY:base64(crypto.getRandomValues(new Uint8Array(32))),GITHUB_APP_KEY_VERSION:'1',WORKBENCH_QA_SOURCE_SHA:options.sourceRevision??'d'.repeat(40)};
+  const now=()=>new Date(clock),fixtures=Object.values(ACTORS).map(a=>({...a,repo:`${a.namespace}/synthetic-fixture`,revision:REVISION }));
+  if(options.canary)db.sql.prepare('INSERT INTO workbench_qa_canary VALUES (1,?,?,?,?,NULL)').run(START,START+900000,JSON.stringify(fixtures),env.WORKBENCH_QA_SOURCE_SHA);
+  else db.sql.prepare('INSERT INTO workbench_qa_window VALUES (1,?,?,?,NULL)').run(START,START+604800000,JSON.stringify(fixtures));
   const actors={};
   for(const [name,a] of Object.entries(ACTORS)) {
     const repo=`${a.namespace}/synthetic-fixture`,project={id:randomUUID(),repository_id:a.repositoryId,installation_id:a.installationId,repo};

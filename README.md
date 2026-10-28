@@ -88,3 +88,7 @@ O código autoral está sob [licença MIT](LICENSE); avisos de terceiros são pr
 ## Evolução em revisão — 21/10/2026
 
 A [matriz das jornadas implementadas](docs/matriz-jornadas-2026-10-21.md) e o [relatório de pendências](docs/pendencias-2026-10-21.md) distinguem código, publicação e homologação. A v13 incorpora as rotas operacionais e correções em PRs ainda sem merge na `main`. A validação consolidada passou em 93 testes Node, 25 Python, TypeScript, lint e build; a correção posterior de retentativa passou em 102 testes Node e ainda aguarda publicação. Login não instala a futura App de repositórios. O operador concluiu a primeira fixture estática do REA no WSL em sete segundos, com uma fonte/342 bytes, zero falhas e unidade encerrada; typecheck completo, entradas arbitrárias e importação hospedada continuam pendentes. Não repetir o preparo: o próximo passo usa o Evidence existente na plataforma.
+
+## Revisão assistida com metodologia Cloudflare
+
+O [guia versionado](docs/assisted-audit.md) organiza cobertura parcial e contraprovas dos candidatos existentes, preservando decisões humanas. Inclui notas offline validadas e fixtures sintéticas; não executa auditoria upstream, alvo, IA ou correções. Depende da PR #47 e não está automaticamente disponível no QA ou na produção.

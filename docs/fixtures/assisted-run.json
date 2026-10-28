@@ -1,0 +1,30 @@
+{
+  "fixture_notice": "Synthetic only; no real repository analysis.",
+  "id": "10000000-0000-4000-8000-000000000001",
+  "project_id": "20000000-0000-4000-8000-000000000001",
+  "repo": "synthetic-owner/inert-fixture",
+  "repository_id": 123,
+  "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "snapshot_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "status": "complete",
+  "source": "github-app",
+  "verified_revision": true,
+  "partial": true,
+  "files_read": 1,
+  "bytes_read": 40,
+  "findings": [
+    {
+      "fingerprint": "11111111111111111111",
+      "kind": "broad-workflow-permissions",
+      "rule_id": "SWB-WORKFLOW-001/1",
+      "path": ".github/workflows/fixture.yml",
+      "line": 2,
+      "status": "candidate",
+      "evidence": "Synthetic structural observation; no workflow executed."
+    }
+  ],
+  "dependencies": [],
+  "omissions": [
+    "Synthetic input, not hosted evidence."
+  ]
+}

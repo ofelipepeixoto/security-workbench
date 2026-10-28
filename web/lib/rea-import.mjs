@@ -37,7 +37,7 @@ function relativePath(value) {
 
 // A small strict JSON reader is needed: JSON.parse silently accepts duplicate
 // keys. Containers and values are bounded before allocation; no eval/reviver.
-function strictJson(data) {
+export function parseEvidenceJson(data) {
   if (!(data instanceof Uint8Array) || !data.byteLength || data.byteLength > MAX_REA_REPORT_BYTES) throw invalid();
   const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(data);
   let cursor = 0, visited = 0;
@@ -153,7 +153,7 @@ function coverage(raw) {
 }
 
 async function project(data) {
-  const evidence = strictJson(data);
+  const evidence = parseEvidenceJson(data);
   if (evidence.operation !== 'analyze_javascript_application' || evidence.predicate_type !== 'rea.javascript-application-analysis') throw invalid();
   const provider = object(evidence.provider);
   if (provider.id !== 'rea-javascript-application' || provider.version !== '1' || evidence.authority !== 'shipped-artifact' || evidence.confidence !== 'derived') throw invalid();

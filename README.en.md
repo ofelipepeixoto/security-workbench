@@ -26,3 +26,7 @@ See the [current requirements matrix](docs/reconciliacao-entregas-2026-10-26.md)
 Automatic PR CI uses public standard Ubuntu runners and local/synthetic tests. Real GitHub acquisition smokes remain intact behind an explicit manual dispatch gate, off by default; a separate scope approval is required. No deployment, paid model, artifact upload or persistent cache is part of these workflows.
 
 [Português and local CLI instructions](README.md) · [Security reporting](SECURITY.md) · [MIT license](LICENSE)
+
+## Assisted review with Cloudflare methodology
+
+The [versioned guide](docs/assisted-audit.md) organizes partial coverage and counterevidence for existing candidates while preserving human decisions. It includes offline notes validation and synthetic fixtures; it does not run the upstream audit, target code, AI, or patches. This increment depends on PR #47 and is not automatically deployed to QA or production.

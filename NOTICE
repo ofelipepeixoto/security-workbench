@@ -1,0 +1,12 @@
+Security Workbench — third-party methodology notice
+
+The scoped assisted-review method in web/lib/assisted-audit.mjs and
+docs/assisted-audit.md adapts ideas and instructions from:
+https://github.com/cloudflare/security-audit-skill
+Pinned source: c1c8a8c1471069fb0e188eeaff69b8e8db6564a8
+Copyright (c) 2025-2026 Cloudflare, Inc. MIT License.
+Full notice: third_party/cloudflare-security-audit-skill.LICENSE
+
+Workbench-specific implementation and fixtures: Copyright (c) 2026 Carlos Felipe.
+Upstream validators/schema and orchestration are not bundled or represented as
+an API, deployed service, endorsement, or completed upstream audit.

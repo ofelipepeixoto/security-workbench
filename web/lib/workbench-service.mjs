@@ -1,5 +1,6 @@
 import * as defaultScanner from './scanner.mjs';
 import {buildReviewGuidance} from './review-advisor.mjs';
+import {buildAssistedAuditPlan} from './assisted-audit.mjs';
 import { parseReaEvidence } from './rea-import.mjs';
 import { isWorkbenchUserAllowed } from './github-auth.mjs';
 import { GitHubAppError } from './github-app-client.mjs';
@@ -194,7 +195,7 @@ export function createWorkbenchService({ db, ownerId, user = { userId: ownerId }
     // The existing owner/project checks precede this projection. Guidance uses
     // current persisted decisions, adds no read/write/provider call, and never
     // enters result_json or changes the scanner's bounded acquisition result.
-    return {...run, guidance: buildReviewGuidance(Array.isArray(result?.findings) ? run : {...run, findings: undefined})};
+    return {...run, audit_plan:buildAssistedAuditPlan(run), guidance: buildReviewGuidance(Array.isArray(result?.findings) ? run : {...run, findings: undefined})};
   };
   const loadContextualRun = async (id) => {
     const row = await first('SELECT * FROM workbench_runs WHERE owner_id = ? AND id = ?', ownerId, identifier(id));

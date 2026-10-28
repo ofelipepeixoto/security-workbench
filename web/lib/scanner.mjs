@@ -2,6 +2,7 @@
 import {GitHubAppError} from './github-app-client.mjs';
 import {CORRECTION_PROMPT_VERSION, renderCorrectionPrompt} from './correction-prompt.mjs';
 import {renderReviewGuidanceMarkdown} from './review-advisor.mjs';
+import {renderAssistedAuditPlanMarkdown} from './assisted-audit.mjs';
 const OWNER = "ofelipepeixoto";
 const API = "https://api.github.com";
 export const SCANNER_VERSION = "workbench-static/1.1";
@@ -333,7 +334,7 @@ export function renderReport(run) {
   for (const item of run.findings || []) lines.push(`### ${markdown(item.kind)} · ${markdown(item.fingerprint)}`, "", `Local: ${markdown(item.path)}:${markdown(item.line)} · estado: ${markdown(item.status)} · confiança: ${markdown(item.confidence)}`, "", `Regra: ${markdown(item.rule_id || "não registrada")} · severidade potencial: ${markdown(item.severity || "não registrada")}`, `Justificativa: ${markdown(item.severity_reason || "não registrada")}`, "", `Evidência: ${markdown(item.evidence)}`, "", `Impacto possível: ${markdown(item.impact)}`, "", `Recomendação: ${markdown(item.recommendation)}`, "");
   for (const item of run.findings || []) if (item.review_identity_ambiguous === true) lines.push(
     `Identidade de revisão ambígua: ${markdown(item.fingerprint)}. Decisão histórica preservada no registro: ${markdown(item.recorded_decision ?? 'não registrada')}; não atribuída individualmente a esta ocorrência.`, "");
-  lines.push(renderReviewGuidanceMarkdown(run), "", "## Inventário de dependências (sem análise de CVEs)", "");
+  lines.push(renderReviewGuidanceMarkdown(run), "", renderAssistedAuditPlanMarkdown(run), "", "## Inventário de dependências (sem análise de CVEs)", "");
   if (!run.dependencies?.length) lines.push("Nenhuma dependência reconhecida nos manifestos suportados.");
   for (const item of run.dependencies || []) lines.push(`- ${markdown(item.name)} ${markdown(item.version)} (${markdown(item.source)})`);
   if (run.omissions?.length) {lines.push("", "## Limitações de leitura", ""); for (const item of run.omissions) lines.push(`- ${markdown(item)}`);}

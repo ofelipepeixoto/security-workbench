@@ -1,0 +1,32 @@
+{
+  "schema": "security-workbench.assisted-notes/v1",
+  "policy_version": "cloudflare-assisted/1.0",
+  "context": {
+    "run_id": "10000000-0000-4000-8000-000000000001",
+    "project_id": "20000000-0000-4000-8000-000000000001",
+    "repository_id": 123,
+    "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "snapshot_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "records": [
+    {
+      "finding_id": "11111111111111111111",
+      "path": ".github/workflows/fixture.yml",
+      "line": 2,
+      "source_verdict": "confirmed",
+      "source_fingerprint": "synthetic:workflow-permissions",
+      "hypothesis": "O emissor declara uma falha; a hipótese ainda precisa de verificação local.",
+      "counterevidence": [
+        "O workflow pode precisar dessas permissões em uma operação autorizada."
+      ],
+      "blockers": [
+        "Gatilhos e operações efetivas não foram conferidos."
+      ],
+      "validation_plan": {
+        "source": "Conferir configuração e controles no mesmo commit autorizado.",
+        "local": "Propor teste inerte; não executar o workflow do alvo.",
+        "deployment": "Titular confirma controles reais sem probes."
+      }
+    }
+  ]
+}

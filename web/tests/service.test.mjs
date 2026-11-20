@@ -136,6 +136,27 @@ test('a second authenticated owner cannot read, review, report, scan, or compare
   db.close();
 });
 
+test('session responses never share a cached project list across identities', async () => {
+  const db = database();
+  try {
+    const first = createWorkbenchService({ db, ownerId: 'owner-a', scanner: scanner() });
+    const { id } = await authorize(first);
+    const get = (identity) => handleWorkbenchRequest(
+      new Request('https://workbench.example/api/workbench'),
+      dependencies(db, { getUser: async () => identity ? { userId: identity } : null }),
+    );
+    for (const [identity, status] of [['owner-a', 200], ['owner-b', 200], [null, 401], ['owner-a', 200]]) {
+      const response = await get(identity);
+      assert.equal(response.status, status);
+      assert.equal(response.headers.get('cache-control'), 'no-store');
+      const body = await response.text();
+      assert.equal(body.includes(id), identity === 'owner-a');
+    }
+  } finally {
+    db.close();
+  }
+});
+
 test('scan request is idempotent and concurrent scans are constrained per project', async () => {
   const db = database();
   let finish;
